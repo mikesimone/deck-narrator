@@ -632,7 +632,7 @@ def assemble(segments, tmp, out_path):
     concat.append(f"file {ffconcat_path(segments[-1][0])}")   # concat demuxer needs the last file repeated
     wav = tmp / "narration.wav"
     sf.write(wav, track, SAMPLE_RATE, subtype="PCM_16")
-    (tmp / "slides.ffconcat").write_text("\n".join(concat) + "\n")
+    (tmp / "slides.ffconcat").write_text("\n".join(concat) + "\n", encoding="utf-8")   # ffmpeg reads UTF-8
 
     log("Measuring loudness...")
     r = run([ffmpeg, "-hide_banner", "-nostats", "-i", str(wav),
@@ -811,7 +811,7 @@ def main(argv=None):
                 "slide_seconds": round(sum(d for _, _, d in segs), 6),
                 "warnings": warnings,
             })
-        (tmp / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+        (tmp / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
         total = assemble(segments, tmp, out_path)
         log(f"Done: {out_path} ({total:.2f}s) in {time.time() - started:.0f}s")

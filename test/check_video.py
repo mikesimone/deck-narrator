@@ -27,7 +27,7 @@ import narrate  # noqa: E402  (constants only: TURN_GAP, CHUNK_GAP, FPS)
 
 PAD, EMPTY, HOLD = 0.75, 3.0, narrate.BUILD_HOLD
 mp4, tmp, expect = sys.argv[1], Path(sys.argv[2]), json.loads(sys.argv[3])
-manifest = json.loads((tmp / "manifest.json").read_text())
+manifest = json.loads((tmp / "manifest.json").read_text(encoding="utf-8"))
 ok = True
 
 
@@ -81,7 +81,7 @@ check("total duration", all(abs(d - total_expected) <= tol for d in (fmt, vd, ad
 # conversion alone costs ~10 dB. Ranking against the slide's other states is
 # what proves the right build is on screen.) Visually identical states, e.g. an
 # emphasis-only click, tie, and a tie is fine.
-pngs = [line.split("'")[1] for line in (tmp / "slides.ffconcat").read_text().splitlines() if line.startswith("file ")][:-1]
+pngs = [line.split("'")[1] for line in (tmp / "slides.ffconcat").read_text(encoding="utf-8").splitlines() if line.startswith("file ")][:-1]
 
 
 def psnr(mp4_time, png):
