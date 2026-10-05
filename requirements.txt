@@ -1,0 +1,12 @@
+# torch is installed first by setup.sh / setup.ps1, from PyTorch's own index:
+# CUDA 12.8 builds when an NVIDIA GPU is present (RTX 50-series needs cu128+), CPU builds otherwise.
+kokoro==0.9.4
+misaki[en]==0.9.4
+transformers>=4.40
+python-pptx==1.0.2
+pypdfium2>=4.30
+soundfile>=0.12
+numpy
+huggingface_hub
+# misaki needs this spaCy model; pinned here so it isn't pip-installed at first run.
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl

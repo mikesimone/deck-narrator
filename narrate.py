@@ -1,0 +1,835 @@
+#!/usr/bin/env python3
+"""deck-narrator: turn a .pptx with speaker notes into a voice-narrated MP4.
+
+Pipeline: python-pptx notes -> LibreOffice PDF -> pypdfium2 PNGs ->
+Kokoro-82M narration -> ffmpeg (H.264 + AAC, yuv420p, loudness-normalized).
+Runs on Linux and Windows.
+
+Speaker notes are a script: [click] advances the slide's animation builds,
+[voice: name] switches the narrator. See README.md next to this file.
+"""
+
+import argparse
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+import builds as anim
+
+SAMPLE_RATE = 24000          # Kokoro's native output rate
+FPS = 30
+WIDTH, HEIGHT = 1920, 1080
+REPO_ID = "hexgrad/Kokoro-82M"
+DEFAULT_VOICE = "af_heart"
+CHUNK_CHARS = 350            # max characters per TTS call; split at sentence ends
+CHUNK_GAP = 0.20             # seconds of silence between TTS chunks of one speaker
+TURN_GAP = 0.35              # seconds between a click and the next words, or between two voices
+BUILD_HOLD = 1.0             # default seconds per build state that has no narration of its own
+LOUDNORM = "I=-16:TP=-1.5:LRA=11"
+
+# Fallback for --list-voices when the HuggingFace listing is unreachable.
+KNOWN_VOICES = [
+    "af_alloy", "af_aoede", "af_bella", "af_heart", "af_jessica", "af_kore",
+    "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky", "am_adam",
+    "am_echo", "am_eric", "am_fenrir", "am_liam", "am_michael", "am_onyx",
+    "am_puck", "am_santa", "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
+    "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
+]
+LANG_NAMES = {
+    "a": "American English", "b": "British English", "e": "Spanish",
+    "f": "French", "h": "Hindi", "i": "Italian", "j": "Japanese",
+    "p": "Brazilian Portuguese", "z": "Mandarin Chinese",
+}
+
+
+class Fail(Exception):
+    """A user-facing error: printed without a traceback."""
+
+
+def log(msg):
+    print(msg, file=sys.stderr, flush=True)
+
+
+# Phonemes and voice names are printed; a Windows console defaults to a code page
+# that can't encode IPA. Never crash on output.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+
+# ---------------------------------------------------------------- arguments
+
+def parse_slide_range(spec):
+    """'3-5' or '1,3,7-9' -> set of 1-based slide numbers."""
+    wanted = set()
+    for part in spec.split(","):
+        part = part.strip()
+        m = re.fullmatch(r"(\d+)(?:-(\d+))?", part)
+        if not m:
+            raise argparse.ArgumentTypeError(f"bad --slides value: {spec!r} (use e.g. 3-5 or 1,4,6-8)")
+        lo = int(m.group(1))
+        hi = int(m.group(2) or lo)
+        if lo < 1 or hi < lo:
+            raise argparse.ArgumentTypeError(f"bad --slides range: {part!r}")
+        wanted.update(range(lo, hi + 1))
+    return wanted
+
+
+def build_parser():
+    p = argparse.ArgumentParser(
+        prog="deck-narrator",
+        description="Turn a PowerPoint deck's speaker notes into a voice-narrated MP4.",
+        epilog="In the notes: [click] advances animation builds, [voice: am_michael] switches narrator, "
+               "[word](/phonemes/) fixes a pronunciation. Guides: README.md, docs/PRONUNCIATION.md",
+    )
+    p.add_argument("deck", nargs="?", help="path to the .pptx")
+    p.add_argument("-o", "--output", help="output .mp4 path or directory (default: next to the deck, same base name)")
+    p.add_argument("--voice", default=DEFAULT_VOICE, help=f"starting voice; [voice: name] in the notes switches it (default: {DEFAULT_VOICE})")
+    p.add_argument("--list-voices", action="store_true", help="list available voices and exit")
+    p.add_argument("--speed", type=float, default=1.0, help="speech speed multiplier (default: 1.0)")
+    p.add_argument("--pad", type=float, default=0.75, help="seconds of silence before and after each slide's narration (default: 0.75)")
+    p.add_argument("--empty-duration", type=float, default=3.0, help="seconds to show a slide with no notes (default: 3.0)")
+    p.add_argument("--skip-empty", action="store_true", help="drop slides with no notes instead of showing them silently")
+    p.add_argument("--slides", type=parse_slide_range, help="only render these slides, e.g. 3-5 or 1,4,6-8 (PowerPoint numbering)")
+    p.add_argument("--no-builds", action="store_true", help="ignore animations: show each slide fully built, as before builds were supported")
+    p.add_argument("--build-hold", type=float, default=BUILD_HOLD, help=f"seconds for a build step with no narration of its own (default: {BUILD_HOLD})")
+    p.add_argument("--show-builds", action="store_true", help="print each selected slide's build steps and how the notes' [click]s line up, and exit (no video)")
+    p.add_argument("--pronunciations", metavar="FILE", help="word=replacement file applied to notes before TTS")
+    p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto", help="where Kokoro runs (default: auto = cuda if available)")
+    p.add_argument("--show-phonemes", action="store_true", help="print each selected slide's script as phonemes, with voices and clicks, and exit (no video)")
+    p.add_argument("--phonemes", metavar="TEXT", help="print the phonemes for TEXT and exit, e.g. --phonemes 'a present'")
+    p.add_argument("--keep-temp", action="store_true", help="keep the intermediate files and print where they are")
+    return p
+
+
+# ---------------------------------------------------------------- notes
+
+# [pause], [click]... but not [word](/phonemes/), which is Kokoro's inline
+# pronunciation override and must reach the TTS intact.
+BRACKETED = re.compile(r"\[[^\[\]]*\](?!\()")
+
+# The two stage directions that do something: [click] and [voice: name].
+MARKER = re.compile(r"\[\s*(?:(?P<click>click)|voice\s*:\s*(?P<voice>[^\[\]]*?))\s*\](?!\()", re.I)
+
+
+def clean_notes(text):
+    text = BRACKETED.sub(" ", text or "")
+    text = re.sub(r"\s+", " ", text)
+    return re.sub(r" (?=[.,!?;:])", "", text).strip()
+
+
+# "[present] (/pɹizˈɛnt/)" with a space looks like a stage direction followed by
+# junk: [present] would be stripped and Kokoro would read "(/pɹizˈɛnt/)" aloud as
+# "slash p r...". Checked on the raw notes, so prose like "(5)" is never flagged.
+DETACHED_OVERRIDE = re.compile(r"\[[^\[\]]*\]\s+\((?:/[^)]*/|[+-]?\d(?:\.5)?)\)")
+
+
+def check_overrides(slides):
+    for s in slides:
+        m = DETACHED_OVERRIDE.search(s["raw_notes"] or "")
+        if m:
+            raise Fail(f"slide {s['number']}: pronunciation override {m.group(0)!r} has a space between ] and (. "
+                       "Write it as [word](/phonemes/) with nothing in between.")
+
+
+def check_voice_name(voice, where):
+    if not re.fullmatch(r"[a-z][fm]_[a-z0-9_]+", voice) or voice[0] not in LANG_NAMES:
+        raise Fail(f"{where}: unknown voice {voice!r}; run --list-voices to see the valid names")
+    return voice
+
+
+def parse_script(raw, voice, default_voice, slide_no, rules=()):
+    """Speaker notes -> (parts, clicks, voice at the end).
+
+    A part is {"step": k, "voice": v, "text": t}: what one voice says after k
+    clicks. [click] advances k, [voice: name] switches v (and stays switched
+    on later slides; [voice: default] goes back to --voice). Every other
+    [bracketed] stage direction is dropped, then pronunciations are applied.
+    """
+    parts, step, pos = [], 0, 0
+
+    def add(segment):
+        text = apply_pronunciations(clean_notes(segment), rules)
+        if not text:
+            return
+        if not re.search(r"\w", text):
+            # Bare punctuation left after a marker ("done [click]."): it belongs
+            # to the words before it, never on its own (Kokoro can't say ".").
+            if parts:
+                parts[-1]["text"] += text
+            return
+        if parts and parts[-1]["step"] == step and parts[-1]["voice"] == voice:
+            parts[-1]["text"] += " " + text
+        else:
+            parts.append({"step": step, "voice": voice, "text": text})
+
+    for m in MARKER.finditer(raw or ""):
+        add(raw[pos:m.start()])
+        pos = m.end()
+        if m.group("click"):
+            step += 1
+        else:
+            name = m.group("voice").strip().lower()
+            voice = default_voice if name in ("", "default") else check_voice_name(name, f"slide {slide_no}")
+    add((raw or "")[pos:])
+    return parts, step, voice
+
+
+def load_pronunciations(path):
+    rules = []
+    for lineno, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise Fail(f"{path}:{lineno}: expected word=replacement, got {raw!r}")
+        word, repl = (s.strip() for s in line.split("=", 1))
+        if not word:
+            raise Fail(f"{path}:{lineno}: empty word")
+        # Whole-word, case-sensitive: "SQL" and "sql" can be told apart.
+        rules.append((word, repl))
+    return rules
+
+
+def apply_pronunciations(text, rules):
+    """One pass over the text: every entry is matched against the original notes,
+    longest entry first at each position, and a replacement is never re-scanned.
+    Inline [word](...) overrides already in the notes are left alone, so they win."""
+    if not rules:
+        return text
+    table = dict(rules)                       # a repeated word: the last line wins
+    words = sorted(table, key=len, reverse=True)
+    pattern = re.compile(r"(?P<override>\[[^\[\]]*\]\([^)]*\))|(?<!\w)(?:"
+                         + "|".join(re.escape(w) for w in words) + r")(?!\w)")
+    return pattern.sub(lambda m: m.group(0) if m.group("override") else table[m.group(0)], text)
+
+
+def read_deck(deck_path, with_builds=True):
+    """Return a list of dicts, one per slide in file order (hidden included)."""
+    from pptx import Presentation
+    try:
+        prs = Presentation(str(deck_path))
+    except Exception as e:
+        raise Fail(f"could not open {deck_path} as a .pptx: {e}")
+    slides = []
+    for idx, slide in enumerate(prs.slides, 1):
+        hidden = slide._element.get("show") == "0"
+        notes = ""
+        if slide.has_notes_slide:
+            tf = slide.notes_slide.notes_text_frame
+            notes = tf.text if tf is not None else ""
+        b = anim.parse_builds(slide._element) if with_builds else anim.NO_BUILDS
+        slides.append({"number": idx, "hidden": hidden, "raw_notes": notes, "builds": b,
+                       "describe": (lambda el=slide._element, b=b: anim.describe(el, b))})
+    return slides
+
+
+def script_deck(slides, start_voice, rules):
+    """Parse every visible slide's notes in deck order, so a [voice: ...] switch
+    carries forward exactly as it would in a full render, even under --slides."""
+    voice = start_voice
+    for s in slides:
+        if s["hidden"]:
+            s.update(parts=[], clicks=0, text="")
+            continue
+        parts, s["clicks"], voice = parse_script(s["raw_notes"], voice, start_voice, s["number"], rules)
+        s["parts"] = fold_parts(parts, len(s["builds"].states))
+        s["text"] = " ".join(p["text"] for p in s["parts"])
+
+
+def fold_parts(parts, n_states):
+    """Clamp each part's step to the slide's last build state, then join neighbours
+    that land on the same state with the same voice. A [click] on a slide with no
+    builds (notes written for live presenting) then costs nothing: the text is
+    voiced in one go, exactly as if the marker weren't there."""
+    out = []
+    for part in parts:
+        step = min(part["step"], n_states - 1)
+        if out and out[-1]["step"] == step and out[-1]["voice"] == part["voice"]:
+            out[-1]["text"] += " " + part["text"]
+        else:
+            out.append({**part, "step": step})
+    return out
+
+
+# ---------------------------------------------------------------- timing
+
+def plan_slide(s, build_hold):
+    """Which build state is on screen while each part is spoken.
+
+    Returns (steps, warnings). steps[k] = {"state": k, "parts": [...]} for every
+    build state; text after the last build's click stays on the last state,
+    and states the notes never click to get build_hold seconds each, after
+    the narration (see segments_for).
+    """
+    n_states = len(s["builds"].states)
+    steps = [{"state": k, "parts": []} for k in range(n_states)]
+    for part in s["parts"]:
+        steps[min(part["step"], n_states - 1)]["parts"].append(part)
+    warnings = []
+    if n_states > 1:
+        clicks = s["clicks"]
+        if clicks > n_states - 1:
+            warnings.append(f"notes have {clicks} [click] but the slide has {n_states - 1} build step(s); "
+                            f"text after click {n_states - 1} stays on the last build")
+        elif clicks < n_states - 1:
+            spare = n_states - 1 - clicks
+            warnings.append(f"slide has {n_states - 1} build step(s) but the notes have {clicks} [click]; "
+                            f"the last {spare} play after the narration, {build_hold:g}s each")
+        if not s["parts"]:
+            warnings = []           # no notes: builds just play through, see segments_for
+    return steps, warnings
+
+
+# ---------------------------------------------------------------- tools
+
+IS_WINDOWS = os.name == "nt"
+INSTALL_HINT = {
+    "ffmpeg": ("winget install Gyan.FFmpeg  (then open a new terminal)" if IS_WINDOWS
+               else "sudo apt-get install ffmpeg"),
+    "soffice": ("winget install TheDocumentFoundation.LibreOffice" if IS_WINDOWS
+                else "sudo apt-get install libreoffice-impress"),
+}
+
+
+def find_ffmpeg():
+    path = os.environ.get("DECK_NARRATOR_FFMPEG") or shutil.which("ffmpeg")
+    if not path or not Path(path).exists():
+        raise Fail(f"ffmpeg not found on PATH (or set DECK_NARRATOR_FFMPEG). Install it: {INSTALL_HINT['ffmpeg']}")
+    return path
+
+
+def find_soffice():
+    """LibreOffice's command-line entry point. On Windows it's usually not on PATH,
+    and soffice.com (the console wrapper, which waits for the conversion to finish)
+    is the one to run, not soffice.exe."""
+    candidates = [os.environ.get("DECK_NARRATOR_SOFFICE")]
+    if IS_WINDOWS:
+        candidates += [shutil.which("soffice.com"), shutil.which("soffice")]
+        for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+            if root:
+                candidates += [str(Path(root) / "LibreOffice" / "program" / n) for n in ("soffice.com", "soffice.exe")]
+    else:
+        candidates += [shutil.which("soffice"), shutil.which("libreoffice")]
+    for c in candidates:
+        if c and Path(c).exists():
+            return c
+    raise Fail(f"LibreOffice (soffice) not found (or set DECK_NARRATOR_SOFFICE). Install it: {INSTALL_HINT['soffice']}")
+
+
+def run(cmd, what):
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        tail = "\n".join((r.stderr or r.stdout).strip().splitlines()[-15:])
+        raise Fail(f"{what} failed (exit {r.returncode}):\n{tail}")
+    return r
+
+
+# ---------------------------------------------------------------- rendering
+
+def export_pdf(deck_path, outdir, profile, include_hidden):
+    soffice = find_soffice()
+    filt = json.dumps({"ExportHiddenSlides": {"type": "boolean", "value": "true" if include_hidden else "false"},
+                       "ExportNotesPages": {"type": "boolean", "value": "false"}})
+    run([soffice, f"-env:UserInstallation={profile.resolve().as_uri()}", "--headless", "--norestore",
+         "--convert-to", f"pdf:impress_pdf_Export:{filt}", "--outdir", str(outdir), str(deck_path)],
+        "LibreOffice PDF export")
+    pdf = outdir / (deck_path.stem + ".pdf")
+    if not pdf.exists():
+        raise Fail(f"LibreOffice reported success but wrote no PDF at {pdf}")
+    return pdf
+
+
+def rasterize(pdf, prefix, expected):
+    """PDF pages -> PNGs, 1920px on the long side (pypdfium2: no poppler needed)."""
+    import pypdfium2 as pdfium
+    doc = pdfium.PdfDocument(str(pdf))
+    try:
+        if len(doc) != expected:
+            raise Fail(f"PDF has {len(doc)} pages but {expected} were expected; "
+                       "can't map pages to slides safely.")
+        pngs = []
+        for i in range(len(doc)):
+            page = doc[i]
+            w, h = page.get_size()
+            image = page.render(scale=WIDTH / max(w, h)).to_pil()
+            png = prefix.with_name(f"{prefix.name}-{i + 1}.png")
+            image.save(png)
+            pngs.append(png)
+            page.close()
+        return pngs
+    finally:
+        doc.close()
+
+
+def render_states(deck_path, tmp, slides, selected):
+    """PNG for every (slide number, build state) the video needs.
+
+    Without builds this is one LibreOffice export of the deck as-is (hidden
+    slides included, so page N is slide N). With builds, pass v renders
+    build state v of every selected slide that has one, from an edited copy
+    of the deck; slides not needed in that pass are marked hidden and left
+    out of the PDF, so its pages are exactly the slides we asked for, in order.
+    Passes = 1 + the most clicks on any one slide, not one per build state.
+    """
+    from pptx import Presentation
+    profile = tmp / "lo-profile"
+    n_passes = max(len(s["builds"].states) for s in selected)
+    animated = [s for s in selected if len(s["builds"].states) > 1 or s["builds"].states[0]]
+    out = {}
+    for v in range(n_passes):
+        if v == 0 and not animated:
+            deck, include_hidden, pages = deck_path, True, [s["number"] for s in slides]
+            log("Rendering deck to PDF with LibreOffice...")
+        else:
+            prs = Presentation(str(deck_path))
+            pages = []
+            by_number = {s["number"]: s for s in selected}
+            for num, slide in enumerate(prs.slides, 1):
+                s = by_number.get(num)
+                states = s["builds"].states if s else []
+                if v == 0:
+                    pages.append(num)               # pass 0 keeps every slide, page N = slide N
+                    if states:
+                        anim.apply_state(slide._element, states[0])
+                elif len(states) > v:
+                    slide._element.attrib.pop("show", None)
+                    anim.apply_state(slide._element, states[v])
+                    pages.append(num)
+                else:
+                    slide._element.set("show", "0")
+            passdir = tmp / f"pass{v}"
+            passdir.mkdir()
+            deck = passdir / deck_path.name
+            prs.save(str(deck))
+            include_hidden = v == 0
+            log(f"Rendering build pass {v + 1}/{n_passes} with LibreOffice...")
+        pdf = export_pdf(deck, tmp / f"pdf{v}", profile, include_hidden)
+        for num, png in zip(pages, rasterize(pdf, tmp / f"p{v}", len(pages))):
+            out[(num, v)] = png
+    return out
+
+
+# ---------------------------------------------------------------- TTS
+
+def split_sentences(text):
+    """Split at sentence ends, then pack sentences into <= CHUNK_CHARS chunks."""
+    sentences = [s for s in re.split(r"(?<=[.!?…])[\"')\]]*\s+", text) if s.strip()]
+    pieces = []
+    for s in sentences:
+        # A single run-on "sentence" longer than the limit: break at commas/
+        # semicolons, then at spaces as a last resort. Never drop words.
+        while len(s) > CHUNK_CHARS:
+            cut = max(s.rfind(sep, 0, CHUNK_CHARS) for sep in (", ", "; ", ": ", " - "))
+            if cut <= 0:
+                cut = s.rfind(" ", 0, CHUNK_CHARS)
+            if cut <= 0:
+                cut = CHUNK_CHARS
+            pieces.append(s[:cut + 1].strip())
+            s = s[cut + 1:].strip()
+        if s:
+            pieces.append(s)
+    chunks, cur = [], ""
+    for piece in pieces:
+        if cur and len(cur) + 1 + len(piece) > CHUNK_CHARS:
+            chunks.append(cur)
+            cur = piece
+        else:
+            cur = f"{cur} {piece}".strip()
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def resolve_device(choice):
+    import torch
+    if choice == "cuda" and not torch.cuda.is_available():
+        raise Fail("--device cuda requested but CUDA is not available to torch")
+    if choice == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    return choice
+
+
+class TTS:
+    """One Kokoro model, shared by a phonemizer pipeline per language
+    (American and British English need different ones), voices loaded on demand."""
+
+    def __init__(self, device):
+        import warnings
+        warnings.filterwarnings("ignore")
+        try:
+            from kokoro import KModel
+        except ImportError as e:
+            raise Fail(f"kokoro isn't installed in this Python ({sys.executable}): {e}. Run setup.sh.")
+        log(f"Loading Kokoro-82M on {device}...")
+        try:
+            self.model = KModel(repo_id=REPO_ID).to(device).eval()
+        except Exception as e:
+            raise Fail(f"could not load the Kokoro model from HuggingFace ({REPO_ID}): "
+                       f"{type(e).__name__}: {e}\nCheck network access.")
+        self.device = device
+        self.pipes = {}
+
+    def pipe(self, voice, where="--voice"):
+        from kokoro import KPipeline
+        check_voice_name(voice, where)
+        lang = voice[0]
+        try:
+            if lang not in self.pipes:
+                self.pipes[lang] = KPipeline(lang_code=lang, repo_id=REPO_ID, model=self.model)
+            self.pipes[lang].load_voice(voice)
+        except ModuleNotFoundError as e:
+            raise Fail(f"{where}: voice {voice!r} ({LANG_NAMES[lang]}) needs an extra package that isn't installed: "
+                       f"{e}. English voices (a*/b*) work out of the box.")
+        except Exception as e:
+            raise Fail(f"{where}: could not load voice {voice!r} from HuggingFace ({REPO_ID}): "
+                       f"{type(e).__name__}: {e}\nCheck network access, or run --list-voices to check the name.")
+        return self.pipes[lang]
+
+    def synthesize(self, voice, text, speed):
+        import numpy as np
+        pipe = self.pipe(voice)
+        out = []
+        gap = np.zeros(int(CHUNK_GAP * SAMPLE_RATE), dtype=np.float32)
+        for chunk in split_sentences(text):
+            parts = []
+            for result in pipe(chunk, voice=voice, speed=speed, split_pattern=None):
+                if result.audio is not None:
+                    parts.append(result.audio.detach().cpu().numpy().astype(np.float32))
+            if not parts:
+                raise Fail(f"Kokoro produced no audio for: {chunk[:80]!r}")
+            if out:
+                out.append(gap)
+            out.extend(parts)
+        return np.concatenate(out)
+
+    def phonemize(self, voice, text):
+        """What Kokoro will actually say, in its phoneme alphabet (overrides applied)."""
+        ps, _ = self.pipe(voice).g2p(text)
+        return ps
+
+
+def speech_level(audio):
+    """RMS of the parts of a clip that are actually speech (20 ms frames above -45 dBFS)."""
+    import numpy as np
+    n = len(audio) // 480 * 480
+    if n == 0:
+        return 0.0
+    frames = audio[:n].reshape(-1, 480)
+    rms = np.sqrt((frames ** 2).mean(axis=1))
+    active = rms[rms > 10 ** (-45 / 20)]
+    return float(np.sqrt((active ** 2).mean())) if len(active) else 0.0
+
+
+def level_voices(clips):
+    """Bring every voice to the same speech level before the deck-wide loudnorm,
+    so a voice switch doesn't sound like someone touched the volume.
+    clips: list of (voice, ndarray), scaled in place. Returns {voice: gain}."""
+    import numpy as np
+    by_voice = {}
+    for voice, audio in clips:
+        by_voice.setdefault(voice, []).append(audio)
+    if len(by_voice) < 2:
+        return {}
+    levels = {v: speech_level(np.concatenate(a)) for v, a in by_voice.items()}
+    target = float(np.median([l for l in levels.values() if l > 0]))
+    gains = {v: (target / l if l > 0 else 1.0) for v, l in levels.items()}
+    for voice, audio in clips:
+        audio *= gains[voice]
+    return gains
+
+
+def list_voices():
+    try:
+        from huggingface_hub import list_repo_files
+        voices = sorted(f[len("voices/"):-3] for f in list_repo_files(REPO_ID)
+                        if f.startswith("voices/") and f.endswith(".pt"))
+        source = REPO_ID
+    except Exception as e:
+        voices, source = KNOWN_VOICES, f"built-in list (HuggingFace unreachable: {type(e).__name__})"
+    print(f"Kokoro voices ({source}). Prefix: 1st letter = language, 2nd = f/m.")
+    for v in voices:
+        mark = "  (default)" if v == DEFAULT_VOICE else ""
+        print(f"  {v:<16} {LANG_NAMES.get(v[0], '?')}{mark}")
+    print("English voices (a*/b*) work out of the box; other languages may need extra misaki packages.")
+
+
+# ---------------------------------------------------------------- assembly
+
+def frame_align(seconds):
+    """Round up to a whole number of video frames, so audio and video agree exactly."""
+    return math.ceil(round(seconds * FPS, 6)) / FPS
+
+
+def silence(seconds):
+    import numpy as np
+    return np.zeros(int(round(seconds * SAMPLE_RATE)), dtype=np.float32)
+
+
+def segments_for(s, steps, audio_of, args):
+    """One slide -> [(state, audio or None, seconds)], every duration frame-aligned.
+
+    Narrated: state 0 opens with the lead-in pad; each later state opens with
+    a short beat (the click) before its words; the last state carries the
+    trailing pad. Unnarrated build states get --build-hold. A slide with no
+    notes plays its builds through at --build-hold each and rests on the
+    final state for --empty-duration.
+    """
+    import numpy as np
+    if not s["parts"]:
+        n = len(steps)
+        return [(k, None, frame_align(args.build_hold if k < n - 1 else args.empty_duration)) for k in range(n)]
+    segs = []
+    for k, step in enumerate(steps):
+        pieces = [silence(args.pad if k == 0 else TURN_GAP)] if (k == 0 or step["parts"]) else []
+        for i, part in enumerate(step["parts"]):
+            if i:
+                pieces.append(silence(TURN_GAP if part["voice"] != step["parts"][i - 1]["voice"] else CHUNK_GAP))
+            pieces.append(audio_of[id(part)])
+        speech = sum(len(p) for p in pieces) / SAMPLE_RATE
+        if not step["parts"] and k > 0:
+            speech = args.build_hold        # a build with nothing said over it: [click][click], or spare builds
+        if k == len(steps) - 1:
+            speech += args.pad
+        audio = np.concatenate(pieces) if pieces else None
+        segs.append((k, audio, frame_align(speech)))
+    return segs
+
+
+def ffconcat_path(path):
+    """Quote a path for an ffconcat file: forward slashes (fine on Windows too),
+    and ' escaped the way the concat demuxer expects."""
+    return "'" + Path(path).resolve().as_posix().replace("'", "'\\''") + "'"
+
+
+def assemble(segments, tmp, out_path):
+    """segments: list of (png_path, audio ndarray, duration_seconds)."""
+    import numpy as np
+    import soundfile as sf
+    ffmpeg = find_ffmpeg()
+
+    # One continuous audio track, built sample-exact from per-segment durations.
+    total = sum(d for _, _, d in segments)
+    track = np.zeros(int(round(total * SAMPLE_RATE)), dtype=np.float32)
+    concat = ["ffconcat version 1.0"]
+    t = 0.0
+    for png, audio, dur in segments:
+        start = int(round(t * SAMPLE_RATE))
+        if audio is not None:
+            seg = audio[:int(round(dur * SAMPLE_RATE))]
+            track[start:start + len(seg)] = seg[:len(track) - start]
+        concat += [f"file {ffconcat_path(png)}", f"duration {dur:.6f}"]
+        t += dur
+    concat.append(f"file {ffconcat_path(segments[-1][0])}")   # concat demuxer needs the last file repeated
+    wav = tmp / "narration.wav"
+    sf.write(wav, track, SAMPLE_RATE, subtype="PCM_16")
+    (tmp / "slides.ffconcat").write_text("\n".join(concat) + "\n")
+
+    log("Measuring loudness...")
+    r = run([ffmpeg, "-hide_banner", "-nostats", "-i", str(wav),
+             "-af", f"loudnorm={LOUDNORM}:print_format=json", "-f", "null", "-"], "loudness measurement")
+    m = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", r.stderr, re.S)
+    if not m:
+        raise Fail("couldn't parse ffmpeg loudnorm measurement")
+    meas = json.loads(m.group(0))
+    if meas["input_i"] in ("-inf", "inf"):
+        af = "anull"   # all-silent deck: nothing to normalize
+    else:
+        af = (f"loudnorm={LOUDNORM}:measured_I={meas['input_i']}:measured_TP={meas['input_tp']}"
+              f":measured_LRA={meas['input_lra']}:measured_thresh={meas['input_thresh']}"
+              f":offset={meas['target_offset']}:linear=true")
+
+    log(f"Encoding {out_path.name} ({total:.2f}s, {len(segments)} frames on screen)...")
+    vf = (f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease:flags=lanczos,"
+          f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,fps={FPS},format=yuv420p")
+    part = out_path.with_name(out_path.stem + ".partial.mp4")
+    run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+         "-f", "concat", "-safe", "0", "-i", str(tmp / "slides.ffconcat"),
+         "-i", str(wav),
+         "-map", "0:v", "-map", "1:a",
+         "-vf", vf, "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-tune", "stillimage",
+         "-profile:v", "high", "-pix_fmt", "yuv420p", "-r", str(FPS),
+         "-af", af, "-ar", "48000", "-c:a", "aac", "-b:a", "192k",
+         "-t", f"{total:.6f}", "-movflags", "+faststart", str(part)],
+        "ffmpeg encode")
+    part.replace(out_path)
+    return total
+
+
+# ---------------------------------------------------------------- main
+
+def resolve_output(deck_path, output):
+    if output:
+        out = Path(output).expanduser()
+        if out.is_dir() or output.endswith(("/", os.sep)):
+            out = out / (deck_path.stem + ".mp4")
+    else:
+        out = deck_path.with_suffix(".mp4")
+    out = out.resolve()
+    # Off by default: a narrated video lands next to its deck, and a deck on the
+    # desktop would litter it. Opt in with DECK_NARRATOR_ALLOW_DESKTOP=1.
+    if any(p.lower() == "desktop" for p in out.parts[:-1]) and os.environ.get("DECK_NARRATOR_ALLOW_DESKTOP") != "1":
+        raise Fail(f"refusing to write to a Desktop folder: {out}. Pass -o somewhere else, "
+                   "or set DECK_NARRATOR_ALLOW_DESKTOP=1.")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if args.list_voices:
+        list_voices()
+        return 0
+    check_voice_name(args.voice, "--voice")
+    if args.phonemes:
+        print(TTS(resolve_device(args.device)).phonemize(args.voice, args.phonemes))
+        return 0
+    if not args.deck:
+        raise Fail("no deck given. Usage: deck-narrator path/to/deck.pptx")
+    deck_path = Path(args.deck).expanduser().resolve()
+    if not deck_path.is_file():
+        raise Fail(f"no such file: {deck_path}")
+    if deck_path.suffix.lower() != ".pptx":
+        raise Fail(f"expected a .pptx file, got {deck_path.name}")
+    if args.pad < 0 or args.empty_duration <= 0 or args.speed <= 0 or args.build_hold <= 0:
+        raise Fail("--pad must be >= 0; --empty-duration, --build-hold and --speed must be > 0")
+    out_path = resolve_output(deck_path, args.output)
+    rules = load_pronunciations(args.pronunciations) if args.pronunciations else []
+
+    # Fail fast on missing binaries before any slow work.
+    find_ffmpeg()
+    find_soffice()
+
+    started = time.time()
+    slides = read_deck(deck_path, with_builds=not args.no_builds)
+    if not slides:
+        raise Fail("the deck has no slides")
+    check_overrides([s for s in slides if not s["hidden"]])
+    script_deck(slides, args.voice, rules)
+    visible = [s for s in slides if not s["hidden"]]
+    hidden = len(slides) - len(visible)
+    if not any(s["text"] for s in visible):
+        raise Fail("no speaker notes found on any visible slide, so there is nothing to narrate. "
+                   "Add notes in PowerPoint (View > Notes) and try again.")
+    if args.slides:
+        visible = [s for s in visible if s["number"] in args.slides]
+        if not visible:
+            raise Fail(f"--slides selected no visible slides (deck has {len(slides)} slides, {hidden} hidden)")
+    if args.skip_empty:
+        visible = [s for s in visible if s["text"]]
+        if not visible:
+            raise Fail("every selected slide is empty and --skip-empty is set; nothing to render")
+
+    with_notes = sum(1 for s in visible if s["text"])
+    animated = sum(1 for s in visible if s["builds"].clicks)
+    voices = sorted({p["voice"] for s in visible for p in s["parts"]})
+    log(f"Deck: {deck_path.name}: {len(slides)} slides, {hidden} hidden, {len(visible)} selected "
+        f"({with_notes} with notes, {animated} with builds; voices: {', '.join(voices) or 'none'})")
+
+    plans = {}
+    for s in visible:
+        plans[s["number"]] = plan_slide(s, args.build_hold)
+        for w in plans[s["number"]][1]:
+            log(f"  note: slide {s['number']}: {w}")
+        if s["builds"].ignored:
+            log(f"  note: slide {s['number']}: {'/'.join(sorted(s['builds'].ignored))} effects don't change "
+                "a still frame and are skipped")
+
+    if args.show_builds:
+        for s in visible:
+            b = s["builds"]
+            print(f"--- slide {s['number']}: {b.clicks} build click(s) in the deck, {s['clicks']} [click] in the notes")
+            for line in s["describe"]():
+                print(line)
+            for step in plans[s["number"]][0]:
+                for part in step["parts"]:
+                    print(f"    state {step['state']} says ({part['voice']}): {part['text'][:70]}"
+                          f"{'...' if len(part['text']) > 70 else ''}")
+            print()
+        return 0
+
+    if args.show_phonemes:
+        tts = TTS(resolve_device(args.device))
+        for s in visible:
+            if s["parts"]:
+                print(f"--- slide {s['number']}")
+                for part in s["parts"]:
+                    click = f"after click {part['step']}, " if part["step"] else ""
+                    print(f"[{click}{part['voice']}] {tts.phonemize(part['voice'], part['text'])}")
+                print()
+        return 0
+
+    tmp = Path(tempfile.mkdtemp(prefix="deck-narrator-"))
+    try:
+        pngs = render_states(deck_path, tmp, slides, visible)
+        audio_of = {}
+        if with_notes:
+            tts = TTS(resolve_device(args.device))
+            for v in voices:                    # every voice loads before any long work
+                first = next(s["number"] for s in visible for p in s["parts"] if p["voice"] == v)
+                tts.pipe(v, f"slide {first}")
+            for i, s in enumerate(visible, 1):
+                if not s["parts"]:
+                    continue
+                t0 = time.time()
+                for part in s["parts"]:
+                    audio_of[id(part)] = tts.synthesize(part["voice"], part["text"], args.speed)
+                speech = sum(len(audio_of[id(p)]) for p in s["parts"]) / SAMPLE_RATE
+                extra = f", {s['builds'].clicks} builds" if s["builds"].clicks else ""
+                who = sorted({p["voice"] for p in s["parts"]})
+                log(f"[{i}/{len(visible)}] slide {s['number']}: {speech:.2f}s narration "
+                    f"({len(s['text'])} chars{extra}{', voices ' + '+'.join(who) if len(voices) > 1 else ''}, "
+                    f"{time.time() - t0:.1f}s to synthesize)")
+            gains = level_voices([(p["voice"], audio_of[id(p)]) for s in visible for p in s["parts"]])
+            if gains:
+                log("Voice levels matched: " + ", ".join(f"{v} x{g:.2f}" for v, g in sorted(gains.items())))
+
+        segments, manifest = [], []
+        for s in visible:
+            steps, warnings = plans[s["number"]]
+            segs = segments_for(s, steps, audio_of, args)
+            for state, audio, dur in segs:
+                segments.append((pngs[(s["number"], state)], audio, dur))
+            if not s["parts"]:
+                log(f"slide {s['number']}: no notes, {sum(d for _, _, d in segs):.2f}s silent")
+            manifest.append({
+                "slide": s["number"],
+                "build_states": len(steps),
+                "clicks_in_notes": s["clicks"],
+                "parts": [{"step": p["step"], "voice": p["voice"], "spoken_text": p["text"],
+                           "seconds": round(len(audio_of[id(p)]) / SAMPLE_RATE, 6)} for p in s["parts"]],
+                "segments": [{"state": st, "seconds": round(d, 6)} for st, _, d in segs],
+                "slide_seconds": round(sum(d for _, _, d in segs), 6),
+                "warnings": warnings,
+            })
+        (tmp / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+
+        total = assemble(segments, tmp, out_path)
+        log(f"Done: {out_path} ({total:.2f}s) in {time.time() - started:.0f}s")
+        print(out_path)
+    finally:
+        if args.keep_temp:
+            log(f"Kept intermediate files in {tmp}")
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Fail as e:
+        log(f"deck-narrator: error: {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        log("deck-narrator: interrupted")
+        sys.exit(130)

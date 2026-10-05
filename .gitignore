@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+# Generated test output
+test/*.mp4
+test/*.pptx
+# PyInstaller
+build/
+dist/

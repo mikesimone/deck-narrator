@@ -1,0 +1,4 @@
+# word=replacement, whole word, case-sensitive. Lines starting with # are comments.
+NGINX=engine x
+NVMe=N V M E
+RTX=R T X

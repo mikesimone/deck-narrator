@@ -1,0 +1,26 @@
+deck-narrator, Windows standalone build
+=======================================
+
+Turns a PowerPoint deck's speaker notes into a voice-narrated MP4.
+
+1. Install the two things it uses (once), in PowerShell or Terminal:
+
+     winget install TheDocumentFoundation.LibreOffice
+     winget install Gyan.FFmpeg
+
+   Then open a NEW terminal, so ffmpeg is on PATH.
+
+2. Run it:
+
+     .\deck-narrator.exe C:\path\to\deck.pptx
+
+   The video is written next to the deck (deck.mp4). The first run downloads the
+   voice model (about 330 MB) into %USERPROFILE%\.cache\huggingface.
+
+This build runs the voice on the CPU (no GPU needed; a 4-minute deck renders in under
+a minute on an 8-core desktop CPU). For NVIDIA GPU speed, install from source instead:
+see README.md, "Windows from source".
+
+Full documentation: README.md in this folder, or the project page on GitHub.
+Licenses: LICENSE, THIRD-PARTY-NOTICES.md and licenses\GPL-3.0.txt (this bundle is
+distributed under GPL-3.0 terms because it includes GPL-3.0 components).
