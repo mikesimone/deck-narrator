@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Runs narrate.py inside this tool's own venv. setup.sh symlinks this into ~/.local/bin.
+set -euo pipefail
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+if [[ ! -x "$here/.venv/bin/python" ]]; then
+    echo "deck-narrator: venv missing; run $here/setup.sh first" >&2
+    exit 1
+fi
+exec "$here/.venv/bin/python" "$here/narrate.py" "$@"
