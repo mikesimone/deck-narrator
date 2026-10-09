@@ -39,8 +39,13 @@ at the version recorded in the bundle's `_internal/*.dist-info` folders, which a
 most packages' license texts. The GPL-3.0 text itself is in the install folder and the zip as
 `licenses/GPL-3.0.txt`. The bundle's components are unmodified.
 
-**Not bundled, installed separately:** LibreOffice (MPL-2.0) and ffmpeg (LGPL/GPL,
-depending on the build).
+**ffmpeg** (Windows zip and installer, in `ffmpeg/`): the unmodified "release essentials"
+build from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), GPL-3.0 (it includes libx264).
+Its license is `ffmpeg/LICENSE`; the corresponding source is at
+[ffmpeg.org](https://ffmpeg.org/download.html) and linked from gyan.dev for that version.
+
+**Not bundled, installed separately:** LibreOffice (MPL-2.0), downloaded from The Document
+Foundation by `install-dependencies.ps1` when it's needed, or Microsoft PowerPoint.
 
 **Downloaded at first run** (source installs and the zip; the installer already has them): the Kokoro-82M model and voices from
 [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), Apache-2.0.

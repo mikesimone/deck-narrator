@@ -45,14 +45,15 @@ class BuildArgs(unittest.TestCase):
         a = self.parse(gui.build_args(form(), "video"))
         d = self.parse(["/decks/talk.pptx"])
         for k in ("deck", "voice", "speed", "pad", "empty_duration", "build_hold", "device",
-                  "skip_empty", "no_builds", "keep_temp", "output", "slides", "pronunciations"):
+                  "skip_empty", "no_builds", "keep_temp", "output", "slides", "pronunciations", "renderer"):
             self.assertEqual(getattr(a, k), getattr(d, k), k)
 
     def test_video_every_option(self):
         a = self.parse(gui.build_args(form(output="/out/v.mp4", voice="bm_george", speed="1.2", device="cpu",
                                            pronunciations="/p.txt", slides="1, 3-4", pad="0.5",
                                            empty_duration="2", build_hold="1.5", skip_empty=True,
-                                           no_builds=True, keep_temp=True), "video"))
+                                           no_builds=True, keep_temp=True, renderer="libreoffice"), "video"))
+        self.assertEqual(a.renderer, "libreoffice")
         self.assertEqual((a.output, a.voice, a.speed, a.device, a.pronunciations), ("/out/v.mp4", "bm_george", 1.2, "cpu", "/p.txt"))
         self.assertEqual(a.slides, {1, 3, 4})
         self.assertEqual((a.pad, a.empty_duration, a.build_hold), (0.5, 2.0, 1.5))

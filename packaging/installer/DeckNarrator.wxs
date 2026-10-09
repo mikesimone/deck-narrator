@@ -4,15 +4,24 @@
   plus the bundled voice model (packaging/fetch_model.py). Build by hand:
 
     wix extension add -g WixToolset.UI.wixext/5.0.2
-    wix build packaging\installer\DeckNarrator.wxs -arch x64 -ext WixToolset.UI.wixext
-        -d Version=1.1.0 -d AppDir=dist\deck-narrator -o deck-narrator.msi
+    wix extension add -g WixToolset.Util.wixext/5.0.2
+    wix build packaging\installer\DeckNarrator.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext
+        -d Version=1.2.0 -d AppDir=dist\deck-narrator -o deck-narrator.msi
 
   Installs to Program Files\Deck Narrator for all users, adds a Start menu entry for the
   GUI and puts the folder on the system PATH (for deck-narrator.exe). Nothing on the
   desktop. Uninstall removes all of it.
+
+  ffmpeg is in the app folder. The finish page has a checkbox (on by default) that runs
+  install-dependencies.cmd: when neither PowerPoint nor LibreOffice is installed, it
+  downloads LibreOffice and installs a minimal copy that leaves Office's file types alone.
+  For a silent install, ask for the same with INSTALLDEPS=1:
+    msiexec /i deck-narrator.msi /qn INSTALLDEPS=1
+  Either way it runs after the install has finished, so it can't fail the install.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="Deck Narrator" Manufacturer="Mike Simone" Version="$(Version)"
            UpgradeCode="ec79f82d-4328-41b7-9706-760957afb3c5" Scope="perMachine" Compressed="yes">
     <MajorUpgrade DowngradeErrorMessage="A newer version of Deck Narrator is already installed." />
@@ -22,7 +31,24 @@
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/mikesimone/deck-narrator" />
     <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)license.rtf" />
-    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUIBannerBmp" Value="$(sys.SOURCEFILEDIR)banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(sys.SOURCEFILEDIR)dialog.bmp" />
+
+    <!-- Dependencies: a checkbox on the finish page (first install only), or INSTALLDEPS=1. -->
+    <SetProperty Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Sequence="ui" Before="CostFinalize" Condition="NOT Installed"
+                 Value="Install LibreOffice if it's needed (only when PowerPoint isn't installed; leaves Office alone)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[INSTALLFOLDER]install-dependencies.cmd" />
+    <CustomAction Id="InstallDependencies" BinaryRef="Wix4UtilCA_X64" DllEntry="WixShellExec" Impersonate="yes" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="InstallDependencies" After="InstallFinalize" Condition="INSTALLDEPS = &quot;1&quot; AND NOT Installed AND UILevel &lt; 5" />
+    </InstallExecuteSequence>
+
+    <UI>
+      <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="InstallDependencies"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+    </UI>
 
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Deck Narrator" />

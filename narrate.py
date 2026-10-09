@@ -23,7 +23,7 @@ from pathlib import Path
 
 import builds as anim
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 SAMPLE_RATE = 24000          # Kokoro's native output rate
 FPS = 30
 WIDTH, HEIGHT = 1920, 1080
@@ -97,6 +97,8 @@ def build_parser():
     p.add_argument("-o", "--output", help="output .mp4 path or directory (default: next to the deck, same base name)")
     p.add_argument("--voice", default=DEFAULT_VOICE, help=f"starting voice; [voice: name] in the notes switches it (default: {DEFAULT_VOICE})")
     p.add_argument("--list-voices", action="store_true", help="list available voices and exit")
+    p.add_argument("--update-voices", action="store_true", help="download voices that are new or updated on HuggingFace "
+                   "(installs with bundled voices only; into a per-user folder) and exit")
     p.add_argument("--speed", type=float, default=1.0, help="speech speed multiplier (default: 1.0)")
     p.add_argument("--pad", type=float, default=0.75, help="seconds of silence before and after each slide's narration (default: 0.75)")
     p.add_argument("--empty-duration", type=float, default=3.0, help="seconds to show a slide with no notes (default: 3.0)")
@@ -107,6 +109,8 @@ def build_parser():
     p.add_argument("--show-builds", action="store_true", help="print each selected slide's build steps and how the notes' [click]s line up, and exit (no video)")
     p.add_argument("--pronunciations", metavar="FILE", help="word=replacement file applied to notes before TTS")
     p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto", help="where Kokoro runs (default: auto = cuda if available)")
+    p.add_argument("--renderer", choices=["auto", "powerpoint", "libreoffice"], default="auto",
+                   help="what draws the slides (default: auto = PowerPoint if it's installed, else LibreOffice)")
     p.add_argument("--show-phonemes", action="store_true", help="print each selected slide's script as phonemes, with voices and clicks, and exit (no video)")
     p.add_argument("--phonemes", metavar="TEXT", help="print the phonemes for TEXT and exit, e.g. --phonemes 'a present'")
     p.add_argument("--sample", metavar="TEXT", help="speak TEXT with --voice, --speed and --pronunciations into a WAV and exit "
@@ -300,13 +304,23 @@ IS_WINDOWS = os.name == "nt"
 INSTALL_HINT = {
     "ffmpeg": ("winget install Gyan.FFmpeg  (then open a new terminal)" if IS_WINDOWS
                else "sudo apt-get install ffmpeg"),
-    "soffice": ("winget install TheDocumentFoundation.LibreOffice" if IS_WINDOWS
+    "soffice": ("Microsoft PowerPoint or LibreOffice is needed to draw the slides. Run install-dependencies.cmd "
+                "in the Deck Narrator folder for a minimal LibreOffice that leaves Office's file types alone, or get "
+                "it from https://www.libreoffice.org/download/" if IS_WINDOWS
                 else "sudo apt-get install libreoffice-impress"),
 }
 
 
+def app_dir():
+    """The folder the program lives in: next to the .exe when frozen, else this file's."""
+    return Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+
+
 def find_ffmpeg():
-    path = os.environ.get("DECK_NARRATOR_FFMPEG") or shutil.which("ffmpeg")
+    """DECK_NARRATOR_FFMPEG, else the copy the Windows builds ship in ffmpeg/, else PATH."""
+    bundled = app_dir() / "ffmpeg" / ("ffmpeg.exe" if IS_WINDOWS else "ffmpeg")
+    path = (os.environ.get("DECK_NARRATOR_FFMPEG") or (str(bundled) if bundled.is_file() else None)
+            or shutil.which("ffmpeg"))
     if not path or not Path(path).exists():
         raise Fail(f"ffmpeg not found on PATH (or set DECK_NARRATOR_FFMPEG). Install it: {INSTALL_HINT['ffmpeg']}")
     return path
@@ -330,6 +344,31 @@ def find_soffice():
     raise Fail(f"LibreOffice (soffice) not found (or set DECK_NARRATOR_SOFFICE). Install it: {INSTALL_HINT['soffice']}")
 
 
+def powerpoint_installed():
+    """True when Microsoft PowerPoint is installed (its COM automation is registered)."""
+    if not IS_WINDOWS:
+        return False
+    import winreg
+    try:
+        winreg.CloseKey(winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, r"PowerPoint.Application\CLSID"))
+        return True
+    except OSError:
+        return False
+
+
+def choose_renderer(choice):
+    """--renderer -> "powerpoint" or "libreoffice", checking the one picked is there.
+    auto prefers PowerPoint: it draws a deck exactly as PowerPoint shows it, and on a PC
+    with Office it means LibreOffice isn't needed at all."""
+    choice = os.environ.get("DECK_NARRATOR_RENDERER") or choice
+    if choice in ("auto", "powerpoint") and powerpoint_installed():
+        return "powerpoint"
+    if choice == "powerpoint":
+        raise Fail("--renderer powerpoint: Microsoft PowerPoint isn't installed on this PC")
+    find_soffice()
+    return "libreoffice"
+
+
 def run(cmd, what):
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
@@ -339,6 +378,47 @@ def run(cmd, what):
 
 
 # ---------------------------------------------------------------- rendering
+
+# Exports the listed slides of a deck to PNGs through PowerPoint's own renderer. It
+# opens the deck read-only and windowless, and quits PowerPoint afterwards only if it
+# wasn't already running (so an open PowerPoint, and the user's decks, are left alone).
+PPT_EXPORT = r"""
+param([string]$Deck, [string]$OutDir, [string]$Slides, [int]$Long)
+$ErrorActionPreference = "Stop"
+$wasRunning = [bool](Get-Process POWERPNT -ErrorAction SilentlyContinue)
+$app = New-Object -ComObject PowerPoint.Application
+$pres = $null
+try {
+    $pres = $app.Presentations.Open($Deck, -1, 0, 0)    # ReadOnly, not Untitled, no window
+    $w = $pres.PageSetup.SlideWidth; $h = $pres.PageSetup.SlideHeight
+    $k = $Long / [Math]::Max($w, $h)
+    $pw = [int][Math]::Round($w * $k); $ph = [int][Math]::Round($h * $k)
+    foreach ($n in $Slides.Split(",")) {
+        $pres.Slides.Item([int]$n).Export((Join-Path $OutDir "s-$n.png"), "PNG", $pw, $ph)
+    }
+} finally {
+    if ($pres) { $pres.Close() }
+    if (-not $wasRunning -and $app.Presentations.Count -eq 0) { $app.Quit() }
+    [void][Runtime.InteropServices.Marshal]::ReleaseComObject($app)
+}
+"""
+
+
+def export_powerpoint(deck_path, outdir, pages):
+    """PNGs of slides `pages` (1-based) of deck_path, drawn by PowerPoint, in that order.
+    Hidden slides export like any other, so no hidden-slide bookkeeping is needed."""
+    outdir.mkdir(parents=True, exist_ok=True)
+    script = outdir / "export.ps1"
+    script.write_text(PPT_EXPORT, encoding="utf-8-sig")
+    run(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
+         "-Deck", str(deck_path.resolve()), "-OutDir", str(outdir.resolve()),
+         "-Slides", ",".join(str(n) for n in pages), "-Long", str(WIDTH)], "PowerPoint export")
+    pngs = [outdir / f"s-{n}.png" for n in pages]
+    missing = [p.name for p in pngs if not p.is_file()]
+    if missing:
+        raise Fail(f"PowerPoint reported success but didn't write {', '.join(missing)}")
+    return pngs
+
 
 def export_pdf(deck_path, outdir, profile, include_hidden):
     soffice = find_soffice()
@@ -375,7 +455,7 @@ def rasterize(pdf, prefix, expected):
         doc.close()
 
 
-def render_states(deck_path, tmp, slides, selected):
+def render_states(deck_path, tmp, slides, selected, renderer="libreoffice"):
     """PNG for every (slide number, build state) the video needs.
 
     Without builds this is one LibreOffice export of the deck as-is (hidden
@@ -384,16 +464,18 @@ def render_states(deck_path, tmp, slides, selected):
     of the deck; slides not needed in that pass are marked hidden and left
     out of the PDF, so its pages are exactly the slides we asked for, in order.
     Passes = 1 + the most clicks on any one slide, not one per build state.
+    With PowerPoint, each pass exports exactly those slides' pictures instead of a PDF.
     """
     from pptx import Presentation
     profile = tmp / "lo-profile"
+    tool = "PowerPoint" if renderer == "powerpoint" else "LibreOffice"
     n_passes = max(len(s["builds"].states) for s in selected)
     animated = [s for s in selected if len(s["builds"].states) > 1 or s["builds"].states[0]]
     out = {}
     for v in range(n_passes):
         if v == 0 and not animated:
             deck, include_hidden, pages = deck_path, True, [s["number"] for s in slides]
-            log("Rendering deck to PDF with LibreOffice...")
+            log(f"Rendering deck with {tool}...")
         else:
             prs = Presentation(str(deck_path))
             pages = []
@@ -416,9 +498,12 @@ def render_states(deck_path, tmp, slides, selected):
             deck = passdir / deck_path.name
             prs.save(str(deck))
             include_hidden = v == 0
-            log(f"Rendering build pass {v + 1}/{n_passes} with LibreOffice...")
-        pdf = export_pdf(deck, tmp / f"pdf{v}", profile, include_hidden)
-        for num, png in zip(pages, rasterize(pdf, tmp / f"p{v}", len(pages))):
+            log(f"Rendering build pass {v + 1}/{n_passes} with {tool}...")
+        if renderer == "powerpoint":
+            pngs = export_powerpoint(deck, tmp / f"ppt{v}", pages)
+        else:
+            pngs = rasterize(export_pdf(deck, tmp / f"pdf{v}", profile, include_hidden), tmp / f"p{v}", len(pages))
+        for num, png in zip(pages, pngs):
             out[(num, v)] = png
     return out
 
@@ -460,8 +545,7 @@ def local_model_dir():
     one there). It needs config.json, kokoro-v1_0.pth and voices/*.pt. None = use the
     HuggingFace download and cache, as before."""
     env = os.environ.get("DECK_NARRATOR_MODEL_DIR")
-    base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-    for d in ([Path(env)] if env else []) + [base / "model"]:
+    for d in ([Path(env)] if env else []) + [app_dir() / "model"]:
         if (d / "config.json").is_file() and (d / "kokoro-v1_0.pth").is_file():
             return d
     if env:
@@ -469,12 +553,94 @@ def local_model_dir():
     return None
 
 
-def voice_ref(voice):
-    """What Kokoro loads for a voice: the bundled .pt file if there is one, else its name."""
+def user_voice_dir():
+    """Where --update-voices puts new and updated voices: per user, so no admin rights
+    are needed and the installed copy is never modified. DECK_NARRATOR_VOICE_DIR overrides."""
+    env = os.environ.get("DECK_NARRATOR_VOICE_DIR")
+    if env:
+        return Path(env)
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return base / "deck-narrator" / "voices"
+
+
+def local_voice_files():
+    """Voice name -> .pt file on this machine: the bundled voices, overridden by
+    downloaded ones (newer, or not bundled at all)."""
+    found = {}
     d = local_model_dir()
-    if d and (d / "voices" / f"{voice}.pt").is_file():
-        return str(d / "voices" / f"{voice}.pt")
-    return voice
+    for folder in ([d / "voices"] if d else []) + [user_voice_dir()]:
+        if folder.is_dir():
+            found.update({p.stem: p for p in folder.glob("*.pt")})
+    return found
+
+
+def voice_ref(voice):
+    """What Kokoro loads for a voice: a local .pt file if there is one, else its name
+    (downloaded from HuggingFace)."""
+    p = local_voice_files().get(voice)
+    return str(p) if p else voice
+
+
+def sha256_file(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def update_voices():
+    """--update-voices: fetch voices that are new on HuggingFace, or that changed since
+    the copy here was made, into user_voice_dir(). Never fails a run for being offline.
+    Prints one summary line on stdout, starting "voices:", for the GUI to read."""
+    if not local_model_dir():
+        log("This install loads voices from HuggingFace by name, so they're always current.")
+        print("voices: not bundled")
+        return 0
+    try:
+        from huggingface_hub import HfApi, hf_hub_download
+        remote = {Path(f.path).stem: f for f in HfApi().list_repo_tree(REPO_ID, path_in_repo="voices")
+                  if f.path.endswith(".pt")}
+    except Exception as e:
+        log(f"Voice check skipped: couldn't reach HuggingFace ({type(e).__name__}). The voices here still work.")
+        print("voices: offline")
+        return 0
+    have = local_voice_files()
+    new, changed = [], []
+    for name, f in sorted(remote.items()):
+        sha = getattr(getattr(f, "lfs", None), "sha256", None)
+        if name not in have:
+            new.append(name)
+        elif sha and sha256_file(have[name]) != sha:
+            changed.append(name)
+    dest = user_voice_dir()
+    for name in new + changed:
+        try:
+            src = Path(hf_hub_download(REPO_ID, f"voices/{name}.pt"))
+            dest.mkdir(parents=True, exist_ok=True)
+            part = dest / f"{name}.pt.part"
+            shutil.copyfile(src, part)
+            part.replace(dest / f"{name}.pt")
+            log(f"  {'new' if name in new else 'updated'}: {name}")
+        except Exception as e:
+            log(f"  couldn't download {name}: {type(e).__name__}: {e}")
+            (new if name in new else changed).remove(name)
+    current = len(remote) - len(new) - len(changed)
+    log(f"Voices: {len(new)} new, {len(changed)} updated, {current} already current (in {dest})")
+    print(f"voices: {len(new)} new{' (' + ', '.join(new) + ')' if new else ''}; "
+          f"{len(changed)} updated{' (' + ', '.join(changed) + ')' if changed else ''}")
+    return 0
+
+
+def available_voices():
+    """Voices the GUI offers: the built-in English list plus any local English voices.
+    (Other languages need extra phonemizer packages that aren't installed.)"""
+    names = set(KNOWN_VOICES) | {v for v in local_voice_files() if v[:1] in ("a", "b")}
+    return sorted(v for v in names if re.fullmatch(r"[a-z][fm]_[a-z0-9_]+", v))
 
 
 def resolve_device(choice):
@@ -584,10 +750,10 @@ def list_voices():
     local = local_model_dir()
     try:
         if local:
-            voices = sorted(p.stem for p in (local / "voices").glob("*.pt"))
+            voices = sorted(local_voice_files())
             if not voices:
                 raise FileNotFoundError(local / "voices")
-            print_voices(voices, f"bundled, {local}")
+            print_voices(voices, f"on this machine: {local / 'voices'} and {user_voice_dir()}")
             return
         from huggingface_hub import list_repo_files
         voices = sorted(f[len("voices/"):-3] for f in list_repo_files(REPO_ID)
@@ -753,6 +919,8 @@ def main(argv=None):
     if args.list_voices:
         list_voices()
         return 0
+    if args.update_voices:
+        return update_voices()
     check_voice_name(args.voice, "--voice")
     if args.phonemes:
         print(TTS(resolve_device(args.device)).phonemize(args.voice, args.phonemes))
@@ -773,7 +941,7 @@ def main(argv=None):
 
     # Fail fast on missing binaries before any slow work.
     find_ffmpeg()
-    find_soffice()
+    renderer = choose_renderer(args.renderer)
 
     started = time.time()
     slides = read_deck(deck_path, with_builds=not args.no_builds)
@@ -836,7 +1004,7 @@ def main(argv=None):
 
     tmp = Path(tempfile.mkdtemp(prefix="deck-narrator-"))
     try:
-        pngs = render_states(deck_path, tmp, slides, visible)
+        pngs = render_states(deck_path, tmp, slides, visible, renderer)
         audio_of = {}
         if with_notes:
             tts = TTS(resolve_device(args.device))

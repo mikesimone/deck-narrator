@@ -6,12 +6,10 @@ it includes the voices and adds a Start menu entry. This zip is the same program
 
 Turns a PowerPoint deck's speaker notes into a voice-narrated MP4.
 
-1. Install the two things it uses (once), in PowerShell or Terminal:
-
-     winget install TheDocumentFoundation.LibreOffice
-     winget install Gyan.FFmpeg
-
-   Then open a NEW terminal, so ffmpeg is on PATH.
+1. Slides are drawn with Microsoft PowerPoint if it's installed. Without PowerPoint,
+   run install-dependencies.cmd in this folder once: it downloads and installs a
+   minimal LibreOffice that leaves Office's file types alone. ffmpeg is included
+   (in the ffmpeg folder), so there's nothing else to install.
 
 2. Run it: double-click deck-narrator-gui.exe for the window, or from a terminal
 

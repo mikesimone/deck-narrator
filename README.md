@@ -43,23 +43,31 @@ or on the CPU if there isn't one.
 **Windows, installer (simplest).** Download `deck-narrator-<version>-x64.msi` from the
 [Releases](../../releases) page and run it. It installs to `Program Files\Deck Narrator` for
 all users, adds **Deck Narrator** to the Start menu, and puts `deck-narrator.exe` on the
-system PATH. The voice model and all its voices are included (the MSI is large because of
-them), so nothing is downloaded when you first make a video. Uninstall from Settings > Apps.
+system PATH. The voice model, all its voices and ffmpeg are included (the MSI is large
+because of them), so nothing is downloaded when you first make a video. Uninstall from
+Settings > Apps.
 
-LibreOffice and ffmpeg are installed separately. The GUI says if either is missing and has
-an **Install them** button that runs winget for you, or run these once:
+**Drawing the slides** takes Microsoft PowerPoint or LibreOffice. If PowerPoint is installed,
+Deck Narrator uses it and nothing else is needed. If not, leave **Install LibreOffice if
+it's needed** ticked on the installer's last page (or press **Install LibreOffice** in the
+GUI, or run `install-dependencies.cmd` in the install folder). It downloads LibreOffice
+straight from The Document Foundation (no winget needed), checks the download's signature,
+and installs only what Deck Narrator uses, leaving Office alone:
 
-```powershell
-winget install TheDocumentFoundation.LibreOffice
-winget install Gyan.FFmpeg
-```
+- `REGISTER_NO_MSO_TYPES=1`: LibreOffice doesn't take over `.pptx`, `.docx` or `.xlsx`, so
+  they keep opening in Office.
+- Only the core and Impress (with Draw, which Impress is built on): no Writer, Calc, Base,
+  Math or online updater. No desktop icon.
+
+A silent install that does the same: `msiexec /i deck-narrator-<version>-x64.msi /qn INSTALLDEPS=1`.
 
 Windows may warn that the installer is from an unknown publisher, because it isn't
 code-signed. Choose **More info**, then **Run anyway**.
 
 **Windows, standalone zip.** `deck-narrator-windows-x64.zip` on the same page is the same
 program without an installer: unzip it anywhere and run `deck-narrator-gui.exe` or
-`deck-narrator.exe`. It downloads the voice model (about 330 MB) the first time it speaks.
+`deck-narrator.exe`. It includes ffmpeg and `install-dependencies.cmd`, and downloads the
+voice model (about 330 MB) the first time it speaks.
 
 Both run the voice on the CPU; for NVIDIA GPU speed, install from source.
 
@@ -141,16 +149,23 @@ Steps 1 and 2 take seconds and render nothing.
 `deck-narrator-gui.cmd` (Windows from source) or `deck-narrator-gui` (Linux, after
 `setup.sh`) opens a window with every option the command line has:
 
-- **Files:** the deck, and where to save the video (blank = next to the deck).
-- **Voice:** pick a voice and speed, type something and press **Play sample** to hear it.
-- **Pronunciation:** **Import...** a [pronunciation file](docs/PRONUNCIATION.md), **New...**
-  to start one from a template, **Edit** to open it in Notepad (or your editor). **Phonemes
-  for** shows how any word or phrase will be said.
-- **Slides and timing:** only some slides, the pauses, skipping empty slides, ignoring
-  animations, keeping temp files, and CPU or GPU.
+- **Deck** tab: the deck, where to save the video (blank = next to the deck), and which
+  slides (blank = all).
+- **Voice** tab: pick a voice and speed, type something and press **Play sample** to hear
+  it. **Check for new voices at startup** (on by default) looks once a day for voices that
+  are new or updated since the install, and downloads them; **Check now** does it at once.
+- **Pronunciation** tab: **Import...** a [pronunciation file](docs/PRONUNCIATION.md),
+  **New...** to start one from a template, **Edit** to open it in Notepad (or your editor).
+  **Phonemes for** shows how any word or phrase will be said.
+- **Options** tab: the pauses, skipping empty slides, ignoring animations, keeping temp
+  files, PowerPoint or LibreOffice for drawing slides, and CPU or GPU.
+- **Log** tab: the full output of the last run. It comes forward when something runs.
 - **Make video**, **Check builds** (the `--show-builds` report) and **Show phonemes** (the
-  `--show-phonemes` report). Progress and the full log show at the bottom; **Cancel** stops
-  a run. When a video is done, **Play video** and **Open folder** open it.
+  `--show-phonemes` report) sit under the tabs, with the progress bar; **Cancel** stops a
+  run. When a video is done, **Play video** and **Open folder** open it.
+
+The window fits a 1024x768 screen. It follows Windows' light or dark app setting
+(`DECK_NARRATOR_THEME=light` or `dark` overrides it).
 
 The GUI is a front end: each button runs the command-line program with the matching
 options (the log's first line shows the exact command), so the two always behave the
@@ -351,6 +366,8 @@ does.
 | `--phonemes TEXT` | | Print the phonemes for `TEXT` and exit. Doesn't need a deck |
 | `--sample TEXT` | | Speak `TEXT` into a WAV with `--voice`, `--speed` and `--pronunciations`, print its path and exit. `-o` names the `.wav` (default: `deck-narrator-sample.wav` in the temp folder). Doesn't need a deck. The GUI's **Play sample** uses this |
 | `--device auto\|cuda\|cpu` | `auto` | Where Kokoro runs. `auto` uses CUDA when torch can see a GPU |
+| `--renderer auto\|powerpoint\|libreoffice` | `auto` | What draws the slides. `auto` uses Microsoft PowerPoint when it's installed (Windows), else LibreOffice |
+| `--update-voices` | | Download voices that are new or updated on HuggingFace since the install, into a per-user folder, print one `voices: ...` line, and exit. Only for installs with bundled voices; others download voices on use anyway |
 | `--keep-temp` | off | Keep the temp dir (PNGs, PDF, WAV, `manifest.json`) and print its path |
 | `--version` | | Print the version and exit |
 | `-h`, `--help` | | Usage |
@@ -367,7 +384,10 @@ Environment variables are listed under [What gets installed](#what-gets-installe
    and a voice. The voice carries from slide to slide. Other stage directions are stripped,
    whitespace is collapsed, and the pronunciation file is applied. Parts that land on the
    same build state with the same voice are joined, so they're voiced in one go.
-3. **Render the slides.** Headless LibreOffice exports the deck to PDF **with hidden slides
+3. **Render the slides.** With PowerPoint (Windows, when it's installed), PowerPoint opens
+   each deck copy read-only and windowless and exports exactly the slides each pass needs
+   as 1920px PNGs; it's quit afterwards only if it wasn't already running. Otherwise,
+   headless LibreOffice exports the deck to PDF **with hidden slides
    included** (`ExportHiddenSlides=true`), so PDF page N is always slide N, then checks that
    the page count matches. With animations, there's one more export per click on the
    busiest slide, from edited copies of the deck (see [Animation builds](#animation-builds)).
@@ -455,7 +475,9 @@ Every error is one line starting `deck-narrator: error:`, with exit code 1, and 
 | `slide N: pronunciation override '...' has a space between ] and (` | Write `[word](/phonemes/)` with nothing between `]` and `(` |
 | `file:LINE: expected word=replacement` | A bad line in the pronunciation file; fix it or comment it out with `#` |
 | `--slides selected no visible slides` | The range only covers hidden or nonexistent slides |
-| `LibreOffice (soffice) not found` / `ffmpeg not found` | The message includes the install command for your OS. If it's installed somewhere unusual, point at it with `DECK_NARRATOR_SOFFICE` / `DECK_NARRATOR_FFMPEG` (full path to the executable) |
+| `LibreOffice (soffice) not found` / `ffmpeg not found` | The message says how to install it on your OS (on Windows: `install-dependencies.cmd`; or install PowerPoint). If it's installed somewhere unusual, point at it with `DECK_NARRATOR_SOFFICE` / `DECK_NARRATOR_FFMPEG` (full path to the executable) |
+| `--renderer powerpoint: Microsoft PowerPoint isn't installed` | Use `--renderer auto` or `libreoffice` |
+| `PowerPoint export failed` | Shows PowerPoint's own error. Usually a corrupt or password-protected deck; `--renderer libreoffice` to try the other renderer |
 | `PDF has X pages but Y were expected` | A LibreOffice export (one per build pass) didn't contain exactly the slides asked for, so pages can't be mapped to slides safely. Re-save the deck in PowerPoint and retry; `--no-builds` as a workaround if it only happens with builds |
 | `LibreOffice PDF export failed` | Shows LibreOffice's own last lines. Usually a corrupt or password-protected deck |
 | `could not load Kokoro model or voice ... from HuggingFace` | First-run download failed (network), or a voice name that doesn't exist (check `--list-voices`) |
@@ -487,14 +509,22 @@ nothing needs activating.
 **The Windows installer** puts everything in `Program Files\Deck Narrator`: the two
 programs, their bundled Python and libraries, and `model\` with Kokoro-82M and every voice.
 It adds a Start menu entry and the folder to the system PATH, and nothing else (no desktop
-icon). LibreOffice and ffmpeg are not included.
+icon). ffmpeg is included, in `ffmpeg\` (a GPL-3.0 build from gyan.dev). LibreOffice
+isn't; see [Install](#install) for the minimal, Office-safe install it offers.
+
+Voices that appear on HuggingFace after the install (or updated versions of included ones)
+go into a per-user folder, `%LOCALAPPDATA%\deck-narrator\voices`
+(`~/.local/share/deck-narrator/voices` on Linux), and win over the bundled copies.
 
 Environment variables, all optional:
 
 | Variable | Effect |
 |---|---|
 | `DECK_NARRATOR_SOFFICE` | Full path to LibreOffice's `soffice` (`soffice.com` on Windows), if it isn't found automatically |
-| `DECK_NARRATOR_FFMPEG` | Full path to `ffmpeg`, if it isn't on PATH |
+| `DECK_NARRATOR_FFMPEG` | Full path to `ffmpeg`. Otherwise the bundled `ffmpeg\ffmpeg.exe` (Windows builds), else PATH |
+| `DECK_NARRATOR_RENDERER` | `powerpoint` or `libreoffice`, overriding `--renderer` |
+| `DECK_NARRATOR_VOICE_DIR` | Where `--update-voices` puts new and updated voices (default: the per-user folder above) |
+| `DECK_NARRATOR_THEME` | `light` or `dark` for the GUI, instead of following Windows |
 | `DECK_NARRATOR_ALLOW_DESKTOP=1` | Allow writing into a Desktop folder |
 | `DECK_NARRATOR_MODEL_DIR` | A folder holding `config.json`, `kokoro-v1_0.pth` and `voices/*.pt`, used instead of downloading. Without it, a `model/` folder next to the program is used if there is one (the Windows installer puts one there); otherwise the HuggingFace download and cache. `packaging/fetch_model.py DEST` makes such a folder |
 
@@ -528,11 +558,12 @@ the same suite against a packaged build instead of the source. CI
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs it on Linux and on Windows, from
 source, then builds the Windows standalone zip and runs the suite again against the built
 `.exe`. Then it builds the MSI, installs it, runs the suite and the GUI against the installed
-copy with HuggingFace switched off (so everything must come from the installer), saves
+copy with HuggingFace switched off (so everything must come from the installer), checks
+`--update-voices` both offline and online, saves
 screenshots of the GUI, and uninstalls it, checking that the files, Start menu entry and
 PATH entry are gone. On Linux it also opens the GUI on a virtual display.
 
-1. **Unit tests** (55, no GPU, under a second). On their own:
+1. **Unit tests** (66, no GPU, under a second). On their own:
    `.venv/bin/python -m unittest discover -s test -v`
    - `test/test_text.py`: stage-direction stripping, keeping overrides, the
      detached-override check, pronunciation-file rules (whole word, case, longest first,
@@ -546,7 +577,10 @@ PATH entry are gone. On Linux it also opens the GUI on a virtual display.
    - `test/test_gui.py`: every command-line option has a GUI control (a new option fails
      this until the GUI has it), and every button builds a command line that parses to
      the intended options.
-   - `test/test_model_dir.py`: finding a bundled model, and falling back to downloading.
+   - `test/test_model_dir.py`: finding a bundled model, falling back to downloading, and
+     `--update-voices` (new and changed voices, offline, nothing bundled), with HuggingFace mocked.
+   - `test/test_tools.py`: choosing PowerPoint or LibreOffice, the bundled ffmpeg, and the
+     PowerPoint build passes exporting the right slides.
 2. **End to end, two decks**, each rendered and checked by `test/check_video.py`:
    - `test/test-deck.pptx` (`make_test_deck.py`): multi-sentence notes with stage
      directions, an inline override, a hidden slide, a slide with no notes, and a long
@@ -582,12 +616,12 @@ The test outputs (`test/*-deck.pptx`, `test/*-deck.mp4`) are gitignored.
 | `deck-narrator-gui`, `deck-narrator-gui.cmd` | GUI wrappers for Linux and Windows |
 | `setup.sh`, `setup.ps1` | Install everything, on Linux and Windows |
 | `requirements.txt` | Python deps (torch is installed separately, from PyTorch's index) |
-| `packaging/` | The PyInstaller spec (both programs), the icon, `fetch_model.py` (bundles the voices), what goes in the zip besides the programs, and `installer/` (the WiX source and license page for the MSI) |
+| `packaging/` | The PyInstaller spec (both programs), the icon and logo (`make_art.py` draws them and the installer images, in the brand colors), `fetch_model.py` (bundles the voices), `install-dependencies.ps1`/`.cmd` (the minimal LibreOffice install), what goes in the zip besides the programs, and `installer/` (the WiX source, license page and banner images for the MSI) |
 | `.github/workflows/ci.yml` | Tests on Linux and Windows, builds the zip and the MSI, tests the installed MSI, attaches both to releases |
 | `LICENSE`, `THIRD-PARTY-NOTICES.md` | MIT for this code; what the zip and installer bundle and under which licenses |
 | `docs/PRONUNCIATION.md` | The full pronunciation guide |
 | `test/verify.py` (`verify.sh`) | Unit tests plus both end-to-end checks |
-| `test/test_text.py`, `test/test_builds.py`, `test/test_gui.py`, `test/test_model_dir.py` | Unit tests |
+| `test/test_text.py`, `test/test_builds.py`, `test/test_gui.py`, `test/test_model_dir.py`, `test/test_tools.py` | Unit tests |
 | `test/gui_selftest.ps1` | Drives the GUI on Windows and screenshots it (CI runs it against the installed MSI) |
 | `test/check_video.py` | The end-to-end checks on a rendered video |
 | `test/make_test_deck.py` | Builds the narration test deck |
