@@ -10,7 +10,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 sudo apt-get update -q
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     libreoffice-impress libreoffice-core ffmpeg \
-    fonts-dejavu fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea
+    fonts-dejavu fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea \
+    python3-tk
 if [[ "${1:-}" == "--ms-fonts" ]]; then
     echo ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true | sudo debconf-set-selections
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ttf-mscorefonts-installer

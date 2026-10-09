@@ -469,6 +469,7 @@ Every error is one line starting `deck-narrator: error:`, with exit code 1, and 
 |---|---|---|---|
 | LibreOffice | apt `libreoffice-impress` | winget `TheDocumentFoundation.LibreOffice` | Slide rendering |
 | ffmpeg | apt `ffmpeg` | winget `Gyan.FFmpeg` | Encoding and loudness |
+| tkinter | apt `python3-tk` | (included with Python) | The GUI. Only needed if the venv uses the system Python |
 | Fonts | apt `fonts-dejavu`, `fonts-liberation`, `fonts-crosextra-carlito`, `fonts-crosextra-caladea` | (Windows has its own) | Metric-compatible stand-ins for Calibri, Cambria, Arial and Times, so text wraps as it does in PowerPoint |
 | Microsoft core fonts | `--ms-fonts`: apt `ttf-mscorefonts-installer`, accepting its EULA | (built in) | Real Georgia, Arial, Verdana and Times. Without them a Georgia title, for example, falls back to DejaVu Serif |
 | [uv](https://docs.astral.sh/uv/) | if missing | if missing | Creates the venv and installs Python packages |
