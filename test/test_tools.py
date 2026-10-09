@@ -68,9 +68,9 @@ class BundledFfmpeg(unittest.TestCase):
 
 class PowerPointPasses(unittest.TestCase):
     def test_every_build_state_comes_from_its_own_slide(self):
-        """anim-deck.pptx through the PowerPoint path: pass 0 exports every slide (hidden
+        """The demo deck (same as test/anim-deck.pptx) through the PowerPoint path: pass 0 exports every slide (hidden
         ones too, page N = slide N); later passes only the slides that still have states."""
-        deck = HERE / "anim-deck.pptx"
+        deck = HERE.parent / "examples" / "demo-deck.pptx"   # committed; test/anim-deck.pptx is generated later
         slides = narrate.read_deck(deck)
         selected = [s for s in slides if not s["hidden"]]
         calls = []
