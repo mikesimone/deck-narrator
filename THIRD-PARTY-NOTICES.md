@@ -8,9 +8,9 @@ A source install (`setup.sh` / `setup.ps1`) downloads its dependencies from PyPI
 PyTorch's index and HuggingFace onto your machine; nothing is redistributed by this
 project. Each package keeps its own license.
 
-## The Windows standalone zip
+## The Windows installer and standalone zip
 
-The zip on the Releases page bundles a Python runtime and these packages (and their
+The installer (MSI) and the zip on the Releases page bundle a Python runtime and these packages (and their
 own dependencies, mostly MIT, BSD and Apache-2.0):
 
 | Component | License |
@@ -24,18 +24,23 @@ own dependencies, mostly MIT, BSD and Apache-2.0):
 | [transformers](https://github.com/huggingface/transformers), [tokenizers](https://github.com/huggingface/tokenizers), [huggingface_hub](https://github.com/huggingface/huggingface_hub) | Apache-2.0 |
 | [spaCy](https://github.com/explosion/spaCy), [en_core_web_sm](https://github.com/explosion/spacy-models) | MIT |
 | [python-pptx](https://github.com/scanny/python-pptx) | MIT |
+| Python's tkinter, with [Tcl/Tk](https://www.tcl.tk/) (the GUI) | PSF / Tcl-Tk license (BSD-style) |
 | [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) and [PDFium](https://pdfium.googlesource.com/pdfium/) | Apache-2.0 / BSD-3-Clause |
 | [NumPy](https://github.com/numpy/numpy), [soundfile](https://github.com/bastibe/python-soundfile) (with libsndfile, LGPL-2.1), [lxml](https://github.com/lxml/lxml), [Pillow](https://github.com/python-pillow/Pillow) | BSD / MIT-CMU / LGPL-2.1 |
 
-Because it includes GPL-3.0 components, **the standalone zip as a whole is distributed
-under the terms of the GNU GPL v3.0**. Corresponding source: this repository (at the
+The installer also includes the [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
+model and voices (Apache-2.0), unmodified, in `model\`. It is built with the
+[WiX Toolset](https://wixtoolset.org/).
+
+Because they include GPL-3.0 components, **the installer and the zip, as a whole, are
+distributed under the terms of the GNU GPL v3.0**. Corresponding source: this repository (at the
 release's tag) for deck-narrator, and each component's upstream repository linked above,
 at the version recorded in the bundle's `_internal/*.dist-info` folders, which also hold
-most packages' license texts. The GPL-3.0 text itself is in the zip as
+most packages' license texts. The GPL-3.0 text itself is in the install folder and the zip as
 `licenses/GPL-3.0.txt`. The bundle's components are unmodified.
 
 **Not bundled, installed separately:** LibreOffice (MPL-2.0) and ffmpeg (LGPL/GPL,
 depending on the build).
 
-**Downloaded at first run:** the Kokoro-82M model and voices from
+**Downloaded at first run** (source installs and the zip; the installer already has them): the Kokoro-82M model and voices from
 [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), Apache-2.0.

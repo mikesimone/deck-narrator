@@ -23,6 +23,7 @@ from pathlib import Path
 
 import builds as anim
 
+VERSION = "1.1.0"
 SAMPLE_RATE = 24000          # Kokoro's native output rate
 FPS = 30
 WIDTH, HEIGHT = 1920, 1080
@@ -91,6 +92,7 @@ def build_parser():
         epilog="In the notes: [click] advances animation builds, [voice: am_michael] switches narrator, "
                "[word](/phonemes/) fixes a pronunciation. Guides: README.md, docs/PRONUNCIATION.md",
     )
+    p.add_argument("--version", action="version", version=f"deck-narrator {VERSION}")
     p.add_argument("deck", nargs="?", help="path to the .pptx")
     p.add_argument("-o", "--output", help="output .mp4 path or directory (default: next to the deck, same base name)")
     p.add_argument("--voice", default=DEFAULT_VOICE, help=f"starting voice; [voice: name] in the notes switches it (default: {DEFAULT_VOICE})")
@@ -107,6 +109,8 @@ def build_parser():
     p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto", help="where Kokoro runs (default: auto = cuda if available)")
     p.add_argument("--show-phonemes", action="store_true", help="print each selected slide's script as phonemes, with voices and clicks, and exit (no video)")
     p.add_argument("--phonemes", metavar="TEXT", help="print the phonemes for TEXT and exit, e.g. --phonemes 'a present'")
+    p.add_argument("--sample", metavar="TEXT", help="speak TEXT with --voice, --speed and --pronunciations into a WAV and exit "
+                   "(-o names the .wav; default: deck-narrator-sample.wav in the temp folder)")
     p.add_argument("--keep-temp", action="store_true", help="keep the intermediate files and print where they are")
     return p
 
@@ -450,6 +454,29 @@ def split_sentences(text):
     return chunks
 
 
+def local_model_dir():
+    """A bundled copy of the model and voices, so nothing is downloaded: the folder in
+    DECK_NARRATOR_MODEL_DIR, else model/ next to the program (the Windows installer puts
+    one there). It needs config.json, kokoro-v1_0.pth and voices/*.pt. None = use the
+    HuggingFace download and cache, as before."""
+    env = os.environ.get("DECK_NARRATOR_MODEL_DIR")
+    base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+    for d in ([Path(env)] if env else []) + [base / "model"]:
+        if (d / "config.json").is_file() and (d / "kokoro-v1_0.pth").is_file():
+            return d
+    if env:
+        raise Fail(f"DECK_NARRATOR_MODEL_DIR={env} has no config.json and kokoro-v1_0.pth")
+    return None
+
+
+def voice_ref(voice):
+    """What Kokoro loads for a voice: the bundled .pt file if there is one, else its name."""
+    d = local_model_dir()
+    if d and (d / "voices" / f"{voice}.pt").is_file():
+        return str(d / "voices" / f"{voice}.pt")
+    return voice
+
+
 def resolve_device(choice):
     import torch
     if choice == "cuda" and not torch.cuda.is_available():
@@ -470,9 +497,14 @@ class TTS:
             from kokoro import KModel
         except ImportError as e:
             raise Fail(f"kokoro isn't installed in this Python ({sys.executable}): {e}. Run setup.sh.")
-        log(f"Loading Kokoro-82M on {device}...")
+        local = local_model_dir()
+        log(f"Loading Kokoro-82M on {device}{f' from {local}' if local else ''}...")
         try:
-            self.model = KModel(repo_id=REPO_ID).to(device).eval()
+            if local:
+                self.model = KModel(repo_id=REPO_ID, config=str(local / "config.json"),
+                                    model=str(local / "kokoro-v1_0.pth")).to(device).eval()
+            else:
+                self.model = KModel(repo_id=REPO_ID).to(device).eval()
         except Exception as e:
             raise Fail(f"could not load the Kokoro model from HuggingFace ({REPO_ID}): "
                        f"{type(e).__name__}: {e}\nCheck network access.")
@@ -486,7 +518,7 @@ class TTS:
         try:
             if lang not in self.pipes:
                 self.pipes[lang] = KPipeline(lang_code=lang, repo_id=REPO_ID, model=self.model)
-            self.pipes[lang].load_voice(voice)
+            self.pipes[lang].load_voice(voice_ref(voice))
         except ModuleNotFoundError as e:
             raise Fail(f"{where}: voice {voice!r} ({LANG_NAMES[lang]}) needs an extra package that isn't installed: "
                        f"{e}. English voices (a*/b*) work out of the box.")
@@ -502,7 +534,7 @@ class TTS:
         gap = np.zeros(int(CHUNK_GAP * SAMPLE_RATE), dtype=np.float32)
         for chunk in split_sentences(text):
             parts = []
-            for result in pipe(chunk, voice=voice, speed=speed, split_pattern=None):
+            for result in pipe(chunk, voice=voice_ref(voice), speed=speed, split_pattern=None):
                 if result.audio is not None:
                     parts.append(result.audio.detach().cpu().numpy().astype(np.float32))
             if not parts:
@@ -549,13 +581,24 @@ def level_voices(clips):
 
 
 def list_voices():
+    local = local_model_dir()
     try:
+        if local:
+            voices = sorted(p.stem for p in (local / "voices").glob("*.pt"))
+            if not voices:
+                raise FileNotFoundError(local / "voices")
+            print_voices(voices, f"bundled, {local}")
+            return
         from huggingface_hub import list_repo_files
         voices = sorted(f[len("voices/"):-3] for f in list_repo_files(REPO_ID)
                         if f.startswith("voices/") and f.endswith(".pt"))
         source = REPO_ID
     except Exception as e:
         voices, source = KNOWN_VOICES, f"built-in list (HuggingFace unreachable: {type(e).__name__})"
+    print_voices(voices, source)
+
+
+def print_voices(voices, source):
     print(f"Kokoro voices ({source}). Prefix: 1st letter = language, 2nd = f/m.")
     for v in voices:
         mark = "  (default)" if v == DEFAULT_VOICE else ""
@@ -684,6 +727,27 @@ def resolve_output(deck_path, output):
     return out
 
 
+def speak_sample(args):
+    """--sample: one phrase to a WAV, for trying voices, speeds and pronunciations."""
+    import soundfile as sf
+    out = Path(args.output).expanduser() if args.output else Path(tempfile.gettempdir()) / "deck-narrator-sample.wav"
+    if out.suffix.lower() != ".wav":
+        raise Fail(f"--sample writes a WAV file; give -o a .wav path, not {out.name}")
+    if args.speed <= 0:
+        raise Fail("--speed must be > 0")
+    rules = load_pronunciations(args.pronunciations) if args.pronunciations else []
+    text = apply_pronunciations(clean_notes(args.sample), rules)
+    if not text:
+        raise Fail("--sample text is empty")
+    audio = TTS(resolve_device(args.device)).synthesize(args.voice, text, args.speed)
+    out = out.resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(out, audio, SAMPLE_RATE, subtype="PCM_16")
+    log(f"Sample: {len(audio) / SAMPLE_RATE:.2f}s of {args.voice}")
+    print(out)
+    return 0
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     if args.list_voices:
@@ -693,6 +757,8 @@ def main(argv=None):
     if args.phonemes:
         print(TTS(resolve_device(args.device)).phonemize(args.voice, args.phonemes))
         return 0
+    if args.sample:
+        return speak_sample(args)
     if not args.deck:
         raise Fail("no deck given. Usage: deck-narrator path/to/deck.pptx")
     deck_path = Path(args.deck).expanduser().resolve()

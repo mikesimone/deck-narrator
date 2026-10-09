@@ -5,8 +5,10 @@ no paid services, no API keys. The voice is
 [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), running locally on the GPU,
 or on the CPU if there isn't one.
 
-- **Runs on Linux and Windows.** Windows has a standalone zip on the
-  [Releases](../../releases) page, or a native PowerShell install from source. See [Install](#install).
+- **Runs on Linux and Windows.** Windows has an installer (MSI) on the
+  [Releases](../../releases) page that includes the voices, a standalone zip, or a native
+  PowerShell install from source. See [Install](#install).
+- **A window or a command line.** The [GUI](#the-gui) can do everything the command line can.
 - **Speed:** a 20-slide, 3:43 deck renders in about 25 seconds on an NVIDIA RTX 5060 Ti, or
   about 40 seconds on an 8-core desktop CPU (Ryzen 7 9700X) with no GPU at all.
 - **Animation builds:** bullets and shapes appear on screen as the narration reaches each
@@ -20,6 +22,7 @@ or on the CPU if there isn't one.
 
 - [Install](#install)
 - [Run it](#run-it)
+- [The GUI](#the-gui)
 - [Writing notes for narration](#writing-notes-for-narration)
 - [Animation builds](#animation-builds)
 - [Switching voices](#switching-voices)
@@ -37,16 +40,28 @@ or on the CPU if there isn't one.
 
 ## Install
 
-**Windows, standalone (simplest).** Download `deck-narrator-windows-x64.zip` from the
-[Releases](../../releases) page and unzip it anywhere. Then, once:
+**Windows, installer (simplest).** Download `deck-narrator-<version>-x64.msi` from the
+[Releases](../../releases) page and run it. It installs to `Program Files\Deck Narrator` for
+all users, adds **Deck Narrator** to the Start menu, and puts `deck-narrator.exe` on the
+system PATH. The voice model and all its voices are included (the MSI is large because of
+them), so nothing is downloaded when you first make a video. Uninstall from Settings > Apps.
+
+LibreOffice and ffmpeg are installed separately. The GUI says if either is missing and has
+an **Install them** button that runs winget for you, or run these once:
 
 ```powershell
 winget install TheDocumentFoundation.LibreOffice
 winget install Gyan.FFmpeg
 ```
 
-Open a new terminal (so ffmpeg is on PATH) and run `deck-narrator.exe` from the unzipped
-folder. This build runs the voice on the CPU; for NVIDIA GPU speed, install from source.
+Windows may warn that the installer is from an unknown publisher, because it isn't
+code-signed. Choose **More info**, then **Run anyway**.
+
+**Windows, standalone zip.** `deck-narrator-windows-x64.zip` on the same page is the same
+program without an installer: unzip it anywhere and run `deck-narrator-gui.exe` or
+`deck-narrator.exe`. It downloads the voice model (about 330 MB) the first time it speaks.
+
+Both run the voice on the CPU; for NVIDIA GPU speed, install from source.
 
 **Windows, from source** (native PowerShell; no WSL, no Docker; uses the GPU if there is one):
 
@@ -59,7 +74,7 @@ cd deck-narrator
 `setup.ps1` installs LibreOffice and ffmpeg with winget if they're missing, installs
 [uv](https://docs.astral.sh/uv/) if it's missing, and creates `.venv` with everything else.
 `-AddToPath` puts the folder on your user PATH so `deck-narrator` works from any folder (in a
-new terminal); without it, run `.\deck-narrator.cmd`.
+new terminal); without it, run `.\deck-narrator.cmd`. The GUI is `.\deck-narrator-gui.cmd`.
 
 **Linux (Debian/Ubuntu):**
 
@@ -119,6 +134,31 @@ deck-narrator deck.pptx --pronunciations deck.words.txt    # 4. the full render
 ```
 
 Steps 1 and 2 take seconds and render nothing.
+
+## The GUI
+
+**Deck Narrator** in the Start menu (installer), `deck-narrator-gui.exe` (zip),
+`deck-narrator-gui.cmd` (Windows from source) or `deck-narrator-gui` (Linux, after
+`setup.sh`) opens a window with every option the command line has:
+
+- **Files:** the deck, and where to save the video (blank = next to the deck).
+- **Voice:** pick a voice and speed, type something and press **Play sample** to hear it.
+- **Pronunciation:** **Import...** a [pronunciation file](docs/PRONUNCIATION.md), **New...**
+  to start one from a template, **Edit** to open it in Notepad (or your editor). **Phonemes
+  for** shows how any word or phrase will be said.
+- **Slides and timing:** only some slides, the pauses, skipping empty slides, ignoring
+  animations, keeping temp files, and CPU or GPU.
+- **Make video**, **Check builds** (the `--show-builds` report) and **Show phonemes** (the
+  `--show-phonemes` report). Progress and the full log show at the bottom; **Cancel** stops
+  a run. When a video is done, **Play video** and **Open folder** open it.
+
+The GUI is a front end: each button runs the command-line program with the matching
+options (the log's first line shows the exact command), so the two always behave the
+same. Your choices are remembered between runs (`%APPDATA%\deck-narrator\gui.json` on
+Windows, `~/.config/deck-narrator/gui.json` on Linux).
+
+**Desktop folders:** like the command line, it won't save a video into a Desktop folder
+unless you tick **Allow saving to a Desktop folder**.
 
 ## Writing notes for narration
 
@@ -306,9 +346,13 @@ does.
 | `--pronunciations FILE` | none | `word=replacement` list applied before speech, see [PRONUNCIATION.md](docs/PRONUNCIATION.md#the-pronunciation-file-every-occurrence) |
 | `--show-phonemes` | | Print every selected slide's script as phonemes, one line per voice and click, after stage directions and the pronunciation file, and exit. No video. Combine with `--slides`, `--pronunciations` and `--voice` |
 | `--phonemes TEXT` | | Print the phonemes for `TEXT` and exit. Doesn't need a deck |
+| `--sample TEXT` | | Speak `TEXT` into a WAV with `--voice`, `--speed` and `--pronunciations`, print its path and exit. `-o` names the `.wav` (default: `deck-narrator-sample.wav` in the temp folder). Doesn't need a deck. The GUI's **Play sample** uses this |
 | `--device auto\|cuda\|cpu` | `auto` | Where Kokoro runs. `auto` uses CUDA when torch can see a GPU |
 | `--keep-temp` | off | Keep the temp dir (PNGs, PDF, WAV, `manifest.json`) and print its path |
+| `--version` | | Print the version and exit |
 | `-h`, `--help` | | Usage |
+
+Environment variables are listed under [What gets installed](#what-gets-installed).
 
 ## What it does, step by step
 
@@ -432,8 +476,14 @@ Every error is one line starting `deck-narrator: error:`, with exit code 1, and 
 | On PATH | `~/.local/bin/deck-narrator` symlink | `-AddToPath`: this folder on your user PATH | So `deck-narrator` works from anywhere |
 | Kokoro-82M model + default voice | `~/.cache/huggingface` | `%USERPROFILE%\.cache\huggingface` | Pre-fetched so the first run doesn't stall |
 
-The wrappers (`deck-narrator` on Linux, `deck-narrator.cmd` on Windows) just run
-`narrate.py` with the venv's Python, so nothing needs activating.
+The wrappers (`deck-narrator` on Linux, `deck-narrator.cmd` on Windows, and the
+`deck-narrator-gui` pair) just run `narrate.py` or `gui.py` with the venv's Python, so
+nothing needs activating.
+
+**The Windows installer** puts everything in `Program Files\Deck Narrator`: the two
+programs, their bundled Python and libraries, and `model\` with Kokoro-82M and every voice.
+It adds a Start menu entry and the folder to the system PATH, and nothing else (no desktop
+icon). LibreOffice and ffmpeg are not included.
 
 Environment variables, all optional:
 
@@ -442,6 +492,7 @@ Environment variables, all optional:
 | `DECK_NARRATOR_SOFFICE` | Full path to LibreOffice's `soffice` (`soffice.com` on Windows), if it isn't found automatically |
 | `DECK_NARRATOR_FFMPEG` | Full path to `ffmpeg`, if it isn't on PATH |
 | `DECK_NARRATOR_ALLOW_DESKTOP=1` | Allow writing into a Desktop folder |
+| `DECK_NARRATOR_MODEL_DIR` | A folder holding `config.json`, `kokoro-v1_0.pth` and `voices/*.pt`, used instead of downloading. Without it, a `model/` folder next to the program is used if there is one (the Windows installer puts one there); otherwise the HuggingFace download and cache. `packaging/fetch_model.py DEST` makes such a folder |
 
 If a deck uses a font that isn't installed, LibreOffice substitutes another one without
 warning. On Linux, check with `fc-match "Font Name"`, and install the font into
@@ -472,9 +523,12 @@ Extra arguments go to deck-narrator (`--device cpu`, for one). `verify.py --exe 
 the same suite against a packaged build instead of the source. CI
 ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs it on Linux and on Windows, from
 source, then builds the Windows standalone zip and runs the suite again against the built
-`.exe`.
+`.exe`. Then it builds the MSI, installs it, runs the suite and the GUI against the installed
+copy with HuggingFace switched off (so everything must come from the installer), saves
+screenshots of the GUI, and uninstalls it, checking that the files, Start menu entry and
+PATH entry are gone. On Linux it also opens the GUI on a virtual display.
 
-1. **Unit tests** (45, no GPU, under a second). On their own:
+1. **Unit tests** (55, no GPU, under a second). On their own:
    `.venv/bin/python -m unittest discover -s test -v`
    - `test/test_text.py`: stage-direction stripping, keeping overrides, the
      detached-override check, pronunciation-file rules (whole word, case, longest first,
@@ -485,6 +539,10 @@ source, then builds the Windows standalone zip and runs the suite again against 
      paragraphs keep their text, missing targets reported), the `[click]`/`[voice: ...]`
      script (steps, switching, `default`, carry-over, bad names, punctuation after a
      marker, overrides aren't markers), folding, and click-count mismatch warnings.
+   - `test/test_gui.py`: every command-line option has a GUI control (a new option fails
+     this until the GUI has it), and every button builds a command line that parses to
+     the intended options.
+   - `test/test_model_dir.py`: finding a bundled model, and falling back to downloading.
 2. **End to end, two decks**, each rendered and checked by `test/check_video.py`:
    - `test/test-deck.pptx` (`make_test_deck.py`): multi-sentence notes with stage
      directions, an inline override, a hidden slide, a slide with no notes, and a long
@@ -516,14 +574,17 @@ The test outputs (`test/*-deck.pptx`, `test/*-deck.mp4`) are gitignored.
 | `builds.py` | Animation builds: parsing `<p:timing>`, rendering a build state, `--show-builds` text |
 | `deck-narrator` | Linux wrapper that runs `narrate.py` with `.venv/bin/python` (symlinked onto PATH) |
 | `deck-narrator.cmd` | Windows wrapper, same job |
+| `gui.py` | The GUI (tkinter): builds the command line from the form and runs it |
+| `deck-narrator-gui`, `deck-narrator-gui.cmd` | GUI wrappers for Linux and Windows |
 | `setup.sh`, `setup.ps1` | Install everything, on Linux and Windows |
 | `requirements.txt` | Python deps (torch is installed separately, from PyTorch's index) |
-| `packaging/` | The PyInstaller spec for the Windows standalone build, and what goes in the zip besides the program |
-| `.github/workflows/ci.yml` | Tests on Linux and Windows, builds the Windows zip, attaches it to releases |
-| `LICENSE`, `THIRD-PARTY-NOTICES.md` | MIT for this code; what the standalone zip bundles and under which licenses |
+| `packaging/` | The PyInstaller spec (both programs), the icon, `fetch_model.py` (bundles the voices), what goes in the zip besides the programs, and `installer/` (the WiX source and license page for the MSI) |
+| `.github/workflows/ci.yml` | Tests on Linux and Windows, builds the zip and the MSI, tests the installed MSI, attaches both to releases |
+| `LICENSE`, `THIRD-PARTY-NOTICES.md` | MIT for this code; what the zip and installer bundle and under which licenses |
 | `docs/PRONUNCIATION.md` | The full pronunciation guide |
 | `test/verify.py` (`verify.sh`) | Unit tests plus both end-to-end checks |
-| `test/test_text.py`, `test/test_builds.py` | Unit tests |
+| `test/test_text.py`, `test/test_builds.py`, `test/test_gui.py`, `test/test_model_dir.py` | Unit tests |
+| `test/gui_selftest.ps1` | Drives the GUI on Windows and screenshots it (CI runs it against the installed MSI) |
 | `test/check_video.py` | The end-to-end checks on a rendered video |
 | `test/make_test_deck.py` | Builds the narration test deck |
 | `test/make_anim_deck.py` | Builds the animation/voices test deck (and a PowerPoint-format timing writer the unit tests reuse) |

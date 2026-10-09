@@ -1,7 +1,13 @@
-# PyInstaller spec for the standalone build (one folder: deck-narrator/deck-narrator[.exe]).
+# PyInstaller spec for the standalone build: one folder, deck-narrator/, holding the
+# command-line program (deck-narrator[.exe]) and the GUI (deck-narrator-gui[.exe]),
+# which share one copy of the libraries.
 # Build from the repo root:  pyinstaller packaging/deck-narrator.spec
 # The GitHub Actions workflow (.github/workflows/ci.yml) builds the Windows zip with this.
+import os
+
 from PyInstaller.utils.hooks import collect_all, copy_metadata
+
+ICON = os.path.join(SPECPATH, "deck-narrator.ico")
 
 datas, binaries, hiddenimports = [], [], []
 # Packages that load data files, plugins or entry points at runtime.
@@ -25,5 +31,21 @@ a = Analysis(
     excludes=["tkinter", "matplotlib", "IPython", "pytest"],
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="deck-narrator", console=True)
-coll = COLLECT(exe, a.binaries, a.datas, name="deck-narrator")
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="deck-narrator", console=True,
+          icon=ICON)
+
+# The GUI only builds command lines and runs the program above, so it needs none of
+# the voice stack; it imports narrate.py just for its constants and the dependency checks.
+g = Analysis(
+    ["../gui.py"],
+    pathex=[".."],
+    datas=[(ICON, ".")],
+    hiddenimports=["builds"],
+    excludes=["torch", "kokoro", "misaki", "spacy", "thinc", "transformers", "numpy", "scipy",
+              "soundfile", "huggingface_hub", "pypdfium2", "pptx", "lxml", "matplotlib", "IPython", "pytest"],
+)
+gpyz = PYZ(g.pure)
+gexe = EXE(gpyz, g.scripts, [], exclude_binaries=True, name="deck-narrator-gui", console=False,
+           icon=ICON)
+
+coll = COLLECT(exe, a.binaries, a.datas, gexe, g.binaries, g.datas, name="deck-narrator")

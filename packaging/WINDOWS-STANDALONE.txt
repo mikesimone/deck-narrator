@@ -1,6 +1,9 @@
 deck-narrator, Windows standalone build
 =======================================
 
+(The installer, deck-narrator-<version>-x64.msi on the Releases page, is the easier way:
+it includes the voices and adds a Start menu entry. This zip is the same program unpacked.)
+
 Turns a PowerPoint deck's speaker notes into a voice-narrated MP4.
 
 1. Install the two things it uses (once), in PowerShell or Terminal:
@@ -10,7 +13,7 @@ Turns a PowerPoint deck's speaker notes into a voice-narrated MP4.
 
    Then open a NEW terminal, so ffmpeg is on PATH.
 
-2. Run it:
+2. Run it: double-click deck-narrator-gui.exe for the window, or from a terminal
 
      .\deck-narrator.exe C:\path\to\deck.pptx
 

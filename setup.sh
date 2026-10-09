@@ -30,6 +30,7 @@ uv pip install --python "$here/.venv/bin/python" -r "$here/requirements.txt"
 
 mkdir -p "$HOME/.local/bin"
 ln -sf "$here/deck-narrator" "$HOME/.local/bin/deck-narrator"
+ln -sf "$here/deck-narrator-gui" "$HOME/.local/bin/deck-narrator-gui"
 
 # Pre-fetch the model + default voice so the first real run doesn't stall on a download.
 "$here/.venv/bin/python" - <<'PY'

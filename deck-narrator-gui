@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Opens the deck-narrator window, using this tool's own venv. setup.sh symlinks this into ~/.local/bin.
+set -euo pipefail
+here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+if [[ ! -x "$here/.venv/bin/python" ]]; then
+    echo "deck-narrator-gui: venv missing; run $here/setup.sh first" >&2
+    exit 1
+fi
+exec "$here/.venv/bin/python" "$here/gui.py" "$@"
