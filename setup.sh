@@ -6,6 +6,8 @@
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Refresh the package lists first: a stale list asks mirrors for package versions they no longer have.
+sudo apt-get update -q
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     libreoffice-impress libreoffice-core ffmpeg \
     fonts-dejavu fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea
