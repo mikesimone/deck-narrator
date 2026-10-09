@@ -51,6 +51,8 @@ COVERED = {
     "deck", "output", "voice", "list_voices", "speed", "pad", "empty_duration",
     "skip_empty", "slides", "no_builds", "build_hold", "show_builds",
     "pronunciations", "device", "show_phonemes", "phonemes", "sample", "keep_temp",
+    "update_voices",   # the "Check for new voices" option and button
+    "renderer",        # Options tab: "Draw slides with"
     "help", "version",
 }
 
@@ -66,11 +68,109 @@ def cli_command():
     return [str(py), str(HERE / "narrate.py")]
 
 
-def icon_path():
-    for p in (Path(getattr(sys, "_MEIPASS", HERE)) / "deck-narrator.ico", HERE / "packaging" / "deck-narrator.ico"):
+# Brand palette, from the ChatShot app: pastel purple and pink on dark amethyst.
+PALETTES = {
+    "dark": {"bg": "#1C1526", "panel": "#241B30", "field": "#160F1E", "ink": "#F1E9FA", "muted": "#A996B8",
+             "accent": "#C2A0E2", "accent_dim": "#A784C6", "pink": "#FF8FD0", "danger": "#E08BB0",
+             "border": "#3A2D4A", "on_accent": "#1C1526"},
+    "light": {"bg": "#F6F1FB", "panel": "#FFFCFF", "field": "#FFFFFF", "ink": "#2E1A3D", "muted": "#6E5A80",
+              "accent": "#A784C6", "accent_dim": "#8F6DB0", "pink": "#E0559E", "danger": "#C1567F",
+              "border": "#D9CCE6", "on_accent": "#FFFBFF"},
+}
+
+
+def system_prefers_dark():
+    """Windows: the "app mode" in Settings > Personalization > Colors. Elsewhere: dark,
+    the brand's default. DECK_NARRATOR_THEME=light or dark overrides both."""
+    forced = os.environ.get("DECK_NARRATOR_THEME", "").lower()
+    if forced in ("light", "dark"):
+        return forced == "dark"
+    if not IS_WINDOWS:
+        return True
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 0
+    except OSError:
+        return True
+
+
+def apply_theme(root, dark):
+    """Style every ttk widget with the brand palette. Returns the palette."""
+    c = PALETTES["dark" if dark else "light"]
+    st = ttk.Style(root)
+    st.theme_use("clam")              # the one built-in theme whose colors can all be set
+    from tkinter import font as tkfont
+    for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont"):
+        f = tkfont.nametofont(name)
+        if IS_WINDOWS:
+            f.configure(family="Segoe UI")
+        f.configure(size=10)
+    base = tkfont.nametofont("TkDefaultFont")
+    bold = base.copy()
+    bold.configure(weight="bold")
+    title = base.copy()
+    title.configure(size=16, weight="bold")
+    root._fonts = (bold, title)       # named fonts vanish when nothing holds them
+    root.configure(bg=c["bg"])
+    st.configure(".", background=c["bg"], foreground=c["ink"], fieldbackground=c["field"], font=base,
+                 bordercolor=c["border"], lightcolor=c["panel"], darkcolor=c["panel"], troughcolor=c["field"],
+                 focuscolor=c["accent"], selectbackground=c["accent_dim"], selectforeground=c["on_accent"],
+                 insertcolor=c["ink"], arrowcolor=c["accent"])
+    st.map(".", foreground=[("disabled", c["muted"])])
+    st.configure("TLabelframe", background=c["bg"], bordercolor=c["border"], relief="solid")
+    st.configure("TLabelframe.Label", background=c["bg"], foreground=c["accent"], font=bold)
+    st.configure("Title.TLabel", foreground=c["accent"], font=title)
+    st.configure("Hint.TLabel", foreground=c["muted"])
+    st.configure("Link.TButton", background=c["bg"], foreground=c["accent"], bordercolor=c["bg"],
+                 lightcolor=c["bg"], darkcolor=c["bg"], padding=(0, 2), font=bold)
+    st.map("Link.TButton", background=[("active", c["bg"]), ("pressed", c["bg"])],
+           foreground=[("active", c["pink"])])
+    st.configure("Warn.TLabel", foreground=c["danger"])
+    st.configure("TButton", background=c["panel"], foreground=c["ink"], bordercolor=c["border"], padding=(10, 4))
+    st.map("TButton", background=[("disabled", c["bg"]), ("pressed", c["field"]), ("active", c["border"])],
+           foreground=[("disabled", c["muted"])])
+    st.configure("Accent.TButton", background=c["accent"], foreground=c["on_accent"], bordercolor=c["accent"],
+                 font=bold)
+    st.map("Accent.TButton", background=[("disabled", c["border"]), ("pressed", c["accent_dim"]), ("active", c["pink"])],
+           foreground=[("disabled", c["muted"])])
+    for w in ("TEntry", "TSpinbox", "TCombobox"):
+        st.configure(w, fieldbackground=c["field"], foreground=c["ink"], insertcolor=c["ink"],
+                     bordercolor=c["border"], lightcolor=c["field"], darkcolor=c["field"], padding=3)
+        st.map(w, fieldbackground=[("readonly", c["field"]), ("disabled", c["bg"])],
+               bordercolor=[("focus", c["accent"])], lightcolor=[("focus", c["accent"])])
+    st.map("TCombobox", selectbackground=[("readonly", c["field"])], selectforeground=[("readonly", c["ink"])])
+    st.configure("TCheckbutton", background=c["bg"], indicatorbackground=c["field"], indicatormargin=4)
+    st.map("TCheckbutton", background=[("active", c["bg"])],
+           indicatorbackground=[("selected", c["accent"]), ("!selected", c["field"])],
+           indicatorforeground=[("selected", c["on_accent"])])
+    st.configure("TNotebook", background=c["bg"], bordercolor=c["border"], lightcolor=c["bg"], darkcolor=c["bg"],
+                 tabmargins=(0, 2, 0, 0))
+    st.configure("TNotebook.Tab", background=c["panel"], foreground=c["muted"], bordercolor=c["border"],
+                 lightcolor=c["panel"], darkcolor=c["panel"], padding=(12, 5), font=bold)
+    st.map("TNotebook.Tab", background=[("selected", c["bg"]), ("active", c["bg"])],
+           foreground=[("selected", c["accent"]), ("active", c["pink"])],
+           lightcolor=[("selected", c["accent"])], darkcolor=[("selected", c["bg"])], expand=[("selected", (0, 2, 0, 0))])
+    st.configure("Horizontal.TProgressbar", background=c["pink"], troughcolor=c["field"], bordercolor=c["border"],
+                 lightcolor=c["pink"], darkcolor=c["pink"])
+    st.configure("Vertical.TScrollbar", background=c["panel"], troughcolor=c["field"], bordercolor=c["border"])
+    for opt, val in (("background", c["field"]), ("foreground", c["ink"]),
+                     ("selectBackground", c["accent_dim"]), ("selectForeground", c["on_accent"])):
+        root.option_add(f"*TCombobox*Listbox.{opt}", val)
+    return c
+
+
+def asset_path(name):
+    """A file shipped next to the program (frozen) or in packaging/ (source)."""
+    for p in (Path(getattr(sys, "_MEIPASS", HERE)) / name, Path(sys.executable).parent / name, HERE / "packaging" / name):
         if p.exists():
             return p
     return None
+
+
+def icon_path():
+    return asset_path("deck-narrator.ico")
 
 
 def config_path():
@@ -122,7 +222,7 @@ def build_args(f, mode):
     if f.get("output"):
         args += ["-o", f["output"]]
     args += ["--speed", f["speed"], "--pad", f["pad"], "--empty-duration", f["empty_duration"],
-             "--build-hold", f["build_hold"]]
+             "--build-hold", f["build_hold"], "--renderer", f.get("renderer") or "auto"]
     if f.get("skip_empty"):
         args.append("--skip-empty")
     if f.get("keep_temp"):
@@ -217,12 +317,15 @@ class App:
         self.last_video = None
         self.sample_wav = Path(tempfile.gettempdir()) / "deck-narrator-gui-sample.wav"
         root.title(f"{TITLE} {narrate.VERSION}")
-        root.minsize(760, 640)
-        if IS_WINDOWS and icon_path():
-            try:
+        self.colors = apply_theme(root, system_prefers_dark())
+        try:
+            if IS_WINDOWS and icon_path():
                 root.iconbitmap(default=str(icon_path()))
-            except tk.TclError:
-                pass
+            elif asset_path("deck-narrator.png"):
+                self.icon_img = tk.PhotoImage(file=str(asset_path("deck-narrator.png")))
+                root.iconphoto(True, self.icon_img)
+        except tk.TclError:
+            pass
         self.v = {
             "deck": tk.StringVar(), "output": tk.StringVar(),
             "voice": tk.StringVar(value=voice_label(narrate.DEFAULT_VOICE)),
@@ -234,32 +337,71 @@ class App:
             "allow_desktop": tk.BooleanVar(),
             "sample_text": tk.StringVar(value="Hello! This is how I sound narrating your slides."),
             "phonemes_text": tk.StringVar(),
+            "check_voices": tk.BooleanVar(value=True),
+            "renderer": tk.StringVar(value="auto"),
+            "tab": tk.StringVar(value="0"),
         }
+        self.last_voice_check = 0.0
         self.load_settings()
         self.build()
+        self.fit_to_screen()
         self.check_dependencies()
         root.protocol("WM_DELETE_WINDOW", self.quit)
+        if self.v["check_voices"].get() and not selftest:
+            root.after(1500, self.check_voices)
+
+    def fit_to_screen(self):
+        """Open at the layout's natural size, but never taller or wider than the screen's
+        work area (a 1024x768 screen minus the taskbar): the log pane shrinks instead."""
+        self.root.geometry("")            # let the layout ask for its natural size again
+        self.root.update_idletasks()
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        w = min(self.root.winfo_reqwidth(), sw - 40)
+        h = min(self.root.winfo_reqheight(), sh - 90)
+        self.root.minsize(min(700, w), min(560, h))
+        self.root.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h - 60) // 2)}")
 
     # ------------------------------------------------------------ layout
 
     def build(self):
-        pad = {"padx": 6, "pady": 3}
-        outer = ttk.Frame(self.root, padding=10)
+        pad = {"padx": 5, "pady": 3}
+        outer = ttk.Frame(self.root, padding=(12, 8, 12, 10))
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
 
+        head = ttk.Frame(outer)
+        head.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        if asset_path("deck-narrator.png"):
+            try:
+                self.logo = tk.PhotoImage(file=str(asset_path("deck-narrator.png"))).subsample(8)
+                ttk.Label(head, image=self.logo).pack(side="left", padx=(0, 8))
+            except tk.TclError:
+                pass
+        ttk.Label(head, text=TITLE, style="Title.TLabel").pack(side="left")
+        ttk.Label(head, text=f"  {narrate.VERSION}  ·  speaker notes to narrated video", style="Hint.TLabel").pack(
+            side="left", pady=(6, 0))
+
         self.banner = ttk.Frame(outer)
-        self.banner.grid(row=0, column=0, sticky="ew")
+        self.banner.grid(row=1, column=0, sticky="ew")
         self.banner.columnconfigure(0, weight=1)
-        self.banner_text = ttk.Label(self.banner, foreground="#a00000", wraplength=560, justify="left")
+        self.banner_text = ttk.Label(self.banner, style="Warn.TLabel", wraplength=520, justify="left")
         self.banner_text.grid(row=0, column=0, rowspan=2, sticky="w")
         if IS_WINDOWS:
-            ttk.Button(self.banner, text="Install them", command=self.install_deps).grid(row=0, column=1, padx=3)
+            ttk.Button(self.banner, text="Install LibreOffice", command=self.install_deps).grid(row=0, column=1, padx=3)
         ttk.Button(self.banner, text="Check again", command=self.check_dependencies).grid(row=1, column=1, padx=3, pady=2)
 
-        files = ttk.LabelFrame(outer, text="Files", padding=6)
-        files.grid(row=1, column=0, sticky="ew", pady=4)
-        files.columnconfigure(1, weight=1)
+        # One tab per part of the job; the log is a tab too, shown when something runs.
+        self.tabs = ttk.Notebook(outer)
+        self.tabs.grid(row=2, column=0, sticky="nsew", pady=(4, 0))
+        outer.rowconfigure(2, weight=1)
+
+        def tab(text):
+            f = ttk.Frame(self.tabs, padding=(10, 8))
+            f.columnconfigure(1, weight=1)
+            self.tabs.add(f, text=f"  {text}  ")
+            return f
+
+        files = tab("Deck")
         ttk.Label(files, text="Deck (.pptx)").grid(row=0, column=0, sticky="w", **pad)
         ttk.Entry(files, textvariable=self.v["deck"]).grid(row=0, column=1, sticky="ew", **pad)
         ttk.Button(files, text="Browse...", command=self.pick_deck).grid(row=0, column=2, **pad)
@@ -267,67 +409,100 @@ class App:
         ttk.Entry(files, textvariable=self.v["output"]).grid(row=1, column=1, sticky="ew", **pad)
         ttk.Button(files, text="Browse...", command=self.pick_output).grid(row=1, column=2, **pad)
         ttk.Label(files, text="Leave blank to save next to the deck, with the same name.",
-                  foreground="#555").grid(row=2, column=1, sticky="w", padx=6)
+                  style="Hint.TLabel").grid(row=2, column=1, sticky="w", padx=6)
+        ttk.Label(files, text="Only slides").grid(row=3, column=0, sticky="w", **pad)
+        ttk.Entry(files, textvariable=self.v["slides"], width=14).grid(row=3, column=1, sticky="w", **pad)
+        ttk.Label(files, text="e.g. 3-5 or 1,4,6-8; blank = all", style="Hint.TLabel").grid(
+            row=4, column=1, sticky="w", padx=6)
 
-        voice = ttk.LabelFrame(outer, text="Voice", padding=6)
-        voice.grid(row=2, column=0, sticky="ew", pady=4)
-        voice.columnconfigure(1, weight=1)
+        voice = tab("Voice")
         ttk.Label(voice, text="Voice").grid(row=0, column=0, sticky="w", **pad)
-        ttk.Combobox(voice, textvariable=self.v["voice"], state="readonly", width=40,
-                     values=[voice_label(x) for x in narrate.KNOWN_VOICES]).grid(row=0, column=1, sticky="w", **pad)
+        self.voice_box = ttk.Combobox(voice, textvariable=self.v["voice"], state="readonly", width=40,
+                                      values=[voice_label(x) for x in narrate.available_voices()])
+        self.voice_box.grid(row=0, column=1, sticky="w", **pad)
         ttk.Label(voice, text="Speed").grid(row=0, column=2, sticky="e", **pad)
         ttk.Spinbox(voice, textvariable=self.v["speed"], from_=0.5, to=2.0, increment=0.05,
                     width=6).grid(row=0, column=3, sticky="w", **pad)
-        ttk.Label(voice, text="Try it").grid(row=1, column=0, sticky="w", **pad)
-        ttk.Entry(voice, textvariable=self.v["sample_text"]).grid(row=1, column=1, columnspan=2, sticky="ew", **pad)
-        self.sample_btn = ttk.Button(voice, text="Play sample", command=lambda: self.run("sample"))
-        self.sample_btn.grid(row=1, column=3, **pad)
         ttk.Label(voice, text="[voice: am_michael] in the notes switches narrator mid-deck.",
-                  foreground="#555").grid(row=2, column=1, columnspan=3, sticky="w", padx=6)
+                  style="Hint.TLabel").grid(row=1, column=1, columnspan=3, sticky="w", padx=6)
+        ttk.Label(voice, text="Try it").grid(row=2, column=0, sticky="w", **pad)
+        ttk.Entry(voice, textvariable=self.v["sample_text"]).grid(row=2, column=1, columnspan=2, sticky="ew", **pad)
+        self.sample_btn = ttk.Button(voice, text="Play sample", command=lambda: self.run("sample"))
+        self.sample_btn.grid(row=2, column=3, **pad)
+        voice_check = ttk.Frame(voice)
+        voice_check.grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(voice_check, text="Check for new voices at startup",
+                        variable=self.v["check_voices"]).pack(side="left", padx=4)
+        ttk.Button(voice_check, text="Check now", command=lambda: self.check_voices(force=True)).pack(side="left", padx=4)
 
-        pron = ttk.LabelFrame(outer, text="Pronunciation", padding=6)
-        pron.grid(row=3, column=0, sticky="ew", pady=4)
-        pron.columnconfigure(1, weight=1)
+        pron = tab("Pronunciation")
         ttk.Label(pron, text="Dictionary").grid(row=0, column=0, sticky="w", **pad)
         ttk.Entry(pron, textvariable=self.v["pronunciations"]).grid(row=0, column=1, sticky="ew", **pad)
         btns = ttk.Frame(pron)
-        btns.grid(row=0, column=2, sticky="e")
-        ttk.Button(btns, text="Import...", command=self.pick_dict).pack(side="left", padx=2)
-        ttk.Button(btns, text="New...", command=self.new_dict).pack(side="left", padx=2)
-        ttk.Button(btns, text="Edit", command=self.edit_dict).pack(side="left", padx=2)
-        ttk.Button(btns, text="Clear", command=lambda: self.v["pronunciations"].set("")).pack(side="left", padx=2)
-        ttk.Label(pron, text="Phonemes for").grid(row=1, column=0, sticky="w", **pad)
-        ttk.Entry(pron, textvariable=self.v["phonemes_text"]).grid(row=1, column=1, sticky="ew", **pad)
-        ttk.Button(pron, text="Show", command=lambda: self.run("phonemes_text")).grid(row=1, column=2, sticky="w", **pad)
+        btns.grid(row=1, column=1, columnspan=2, sticky="w")
+        ttk.Button(btns, text="Import...", command=self.pick_dict).pack(side="left", padx=3)
+        ttk.Button(btns, text="New...", command=self.new_dict).pack(side="left", padx=3)
+        ttk.Button(btns, text="Edit", command=self.edit_dict).pack(side="left", padx=3)
+        ttk.Button(btns, text="Clear", command=lambda: self.v["pronunciations"].set("")).pack(side="left", padx=3)
+        ttk.Label(pron, text="One word=sounds-like per line, applied to the notes before speaking.",
+                  style="Hint.TLabel").grid(row=2, column=1, columnspan=2, sticky="w", padx=6)
+        ttk.Label(pron, text="Phonemes for").grid(row=3, column=0, sticky="w", **pad)
+        ttk.Entry(pron, textvariable=self.v["phonemes_text"]).grid(row=3, column=1, sticky="ew", **pad)
+        ttk.Button(pron, text="Show", command=lambda: self.run("phonemes_text")).grid(row=3, column=2, sticky="w", **pad)
 
-        opts = ttk.LabelFrame(outer, text="Slides and timing", padding=6)
-        opts.grid(row=4, column=0, sticky="ew", pady=4)
-        ttk.Label(opts, text="Only slides").grid(row=0, column=0, sticky="w", **pad)
-        ttk.Entry(opts, textvariable=self.v["slides"], width=14).grid(row=0, column=1, sticky="w", **pad)
-        ttk.Label(opts, text="e.g. 3-5 or 1,4,6-8; blank = all", foreground="#555").grid(
-            row=0, column=2, columnspan=4, sticky="w", **pad)
-        for col, (key, label, hi) in enumerate([("pad", "Pause around narration (s)", 5),
-                                                ("empty_duration", "Slide with no notes (s)", 30),
-                                                ("build_hold", "Silent build step (s)", 10)]):
-            ttk.Label(opts, text=label).grid(row=1, column=col * 2, sticky="w", **pad)
+        opts = tab("Options")
+        opts.columnconfigure(1, weight=0)
+        opts.columnconfigure(2, weight=1)
+        for r, (key, label, hi) in enumerate([("pad", "Pause around narration (s)", 5),
+                                              ("empty_duration", "Slide with no notes (s)", 30),
+                                              ("build_hold", "Silent build step (s)", 10)]):
+            ttk.Label(opts, text=label).grid(row=r, column=0, sticky="w", **pad)
             ttk.Spinbox(opts, textvariable=self.v[key], from_=0, to=hi, increment=0.25, width=6).grid(
-                row=1, column=col * 2 + 1, sticky="w", **pad)
+                row=r, column=1, sticky="w", **pad)
         checks = ttk.Frame(opts)
-        checks.grid(row=2, column=0, columnspan=6, sticky="w")
-        for key, label in [("skip_empty", "Skip slides with no notes"),
-                           ("no_builds", "Ignore animations"),
-                           ("keep_temp", "Keep temp files"),
-                           ("allow_desktop", "Allow saving to a Desktop folder")]:
-            ttk.Checkbutton(checks, text=label, variable=self.v[key]).pack(side="left", padx=6, pady=3)
-        ttk.Label(opts, text="Run voice on").grid(row=3, column=0, sticky="w", **pad)
-        ttk.Combobox(opts, textvariable=self.v["device"], state="readonly", width=8,
-                     values=["auto", "cuda", "cpu"]).grid(row=3, column=1, sticky="w", **pad)
-        ttk.Label(opts, text="auto = NVIDIA GPU if there is one", foreground="#555").grid(
-            row=3, column=2, columnspan=4, sticky="w", **pad)
+        checks.grid(row=0, column=2, rowspan=3, sticky="nw", padx=(24, 0))
+        for i, (key, label) in enumerate([("skip_empty", "Skip slides with no notes"),
+                                          ("no_builds", "Ignore animations"),
+                                          ("keep_temp", "Keep temp files"),
+                                          ("allow_desktop", "Allow saving to a Desktop folder")]):
+            ttk.Checkbutton(checks, text=label, variable=self.v[key]).grid(row=i, column=0, sticky="w", pady=1)
+        ttk.Label(opts, text="Draw slides with").grid(row=3, column=0, sticky="w", **pad)
+        ttk.Combobox(opts, textvariable=self.v["renderer"], state="readonly", width=12,
+                     values=["auto", "powerpoint", "libreoffice"]).grid(row=3, column=1, sticky="w", **pad)
+        ttk.Label(opts, text="auto = PowerPoint if installed", style="Hint.TLabel").grid(
+            row=3, column=2, columnspan=2, sticky="w", **pad)
+        ttk.Label(opts, text="Run voice on").grid(row=4, column=0, sticky="w", **pad)
+        ttk.Combobox(opts, textvariable=self.v["device"], state="readonly", width=12,
+                     values=["auto", "cuda", "cpu"]).grid(row=4, column=1, sticky="w", **pad)
+        ttk.Label(opts, text="auto = NVIDIA GPU if there is one", style="Hint.TLabel").grid(
+            row=4, column=2, columnspan=2, sticky="w", **pad)
+
+        logtab = ttk.Frame(self.tabs, padding=(4, 4))
+        self.tabs.add(logtab, text="  Log  ")
+        self.log_tab = logtab
+        logtab.columnconfigure(0, weight=1)
+        logtab.rowconfigure(0, weight=1)
+        c = self.colors
+        self.log = ScrolledText(logtab, height=9, width=60, wrap="word",
+                                font=("Consolas" if IS_WINDOWS else "monospace", 9),
+                                bg=c["field"], fg=c["ink"], insertbackground=c["ink"], relief="flat",
+                                selectbackground=c["accent_dim"], selectforeground=c["on_accent"],
+                                highlightthickness=1, highlightbackground=c["border"], highlightcolor=c["accent"])
+        try:   # the classic scrollbar: colors apply on Linux; Windows draws its own
+            self.log.vbar.configure(bg=c["panel"], troughcolor=c["field"], activebackground=c["accent_dim"],
+                                    highlightthickness=0, bd=0)
+        except tk.TclError:
+            pass
+        self.log.grid(row=0, column=0, sticky="nsew")
+        self.log.configure(state="disabled")
+        try:
+            self.tabs.select(int(self.v["tab"].get()))
+        except (tk.TclError, ValueError):
+            pass
 
         actions = ttk.Frame(outer)
-        actions.grid(row=5, column=0, sticky="ew", pady=6)
-        self.make_btn = ttk.Button(actions, text="Make video", command=lambda: self.run("video"))
+        actions.grid(row=3, column=0, sticky="ew", pady=(8, 4))
+        self.make_btn = ttk.Button(actions, text="Make video", style="Accent.TButton", command=lambda: self.run("video"))
         self.make_btn.pack(side="left", padx=3)
         ttk.Button(actions, text="Check builds", command=lambda: self.run("builds")).pack(side="left", padx=3)
         ttk.Button(actions, text="Show phonemes", command=lambda: self.run("phonemes")).pack(side="left", padx=3)
@@ -339,19 +514,14 @@ class App:
         self.open_btn.pack(side="right", padx=3)
 
         self.progress = ttk.Progressbar(outer, mode="determinate", maximum=100)
-        self.progress.grid(row=6, column=0, sticky="ew")
+        self.progress.grid(row=4, column=0, sticky="ew")
         self.status = ttk.Label(outer, text="Ready.")
-        self.status.grid(row=7, column=0, sticky="w", pady=2)
-
-        self.log = ScrolledText(outer, height=12, wrap="word", font=("Consolas" if IS_WINDOWS else "monospace", 9))
-        self.log.grid(row=8, column=0, sticky="nsew")
-        self.log.configure(state="disabled")
-        outer.rowconfigure(8, weight=1)
+        self.status.grid(row=5, column=0, sticky="w", pady=(2, 0))
 
     # ------------------------------------------------------------ settings
 
     SAVED = ("voice", "speed", "device", "pronunciations", "pad", "empty_duration", "build_hold",
-             "skip_empty", "no_builds", "keep_temp", "allow_desktop", "sample_text")
+             "skip_empty", "no_builds", "keep_temp", "allow_desktop", "sample_text", "check_voices", "renderer")
 
     def load_settings(self):
         self.last_dir = str(Path.home())
@@ -366,10 +536,17 @@ class App:
                 except tk.TclError:
                     pass
         self.last_dir = data.get("last_dir", self.last_dir)
+        self.v["tab"].set(str(data.get("tab", 0)))
+        self.last_voice_check = float(data.get("last_voice_check", 0) or 0)
 
     def save_settings(self):
         data = {k: self.v[k].get() for k in self.SAVED}
+        try:
+            data["tab"] = min(self.tabs.index("current"), 3)   # reopen on the last form tab, not the log
+        except (tk.TclError, AttributeError):
+            pass
         data["last_dir"] = self.last_dir
+        data["last_voice_check"] = self.last_voice_check
         try:
             config_path().parent.mkdir(parents=True, exist_ok=True)
             config_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -431,31 +608,89 @@ class App:
 
     # ------------------------------------------------------------ running
 
-    WINGET = ("winget install -e --id TheDocumentFoundation.LibreOffice --accept-source-agreements "
-              "--accept-package-agreements & winget install -e --id Gyan.FFmpeg --accept-source-agreements "
-              "--accept-package-agreements")
-
     def install_deps(self):
-        """Run winget in a visible console, so its progress and any prompts can be seen."""
-        subprocess.Popen(["cmd", "/c", "start", "Installing LibreOffice and ffmpeg", "cmd", "/k",
-                          self.WINGET + " & echo. & echo Done. Close this window, then press Check again."])
+        """Run install-dependencies.cmd in a visible console, so its progress can be seen.
+        The installer's finish page runs the same script."""
+        script = asset_path("install-dependencies.cmd")
+        if not script:
+            messagebox.showerror(TITLE, "install-dependencies.cmd is missing from this install.")
+            return
+        subprocess.Popen(["cmd", "/c", "start", "Deck Narrator setup", str(script)])
+
+    VOICE_CHECK_EVERY = 24 * 3600
+
+    def check_voices(self, force=False):
+        """Ask the CLI for new or updated voices, in the background, at most once a day
+        unless forced. Offline or failing, it says so in the status line and nothing else."""
+        import time
+        if getattr(self, "voice_check_running", False):
+            return
+        if not force and time.time() - self.last_voice_check < self.VOICE_CHECK_EVERY:
+            return
+        self.voice_check_running = True
+        self.status.configure(text="Checking for new voices...")
+        flags = subprocess.CREATE_NO_WINDOW if IS_WINDOWS else 0
+        result = {}
+
+        def work():
+            try:
+                r = subprocess.run(cli_command() + ["--update-voices"], stdin=subprocess.DEVNULL,
+                                   capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                   creationflags=flags, timeout=900)
+                result["line"] = next((l for l in r.stdout.splitlines() if l.startswith("voices:")), "")
+                result["code"] = r.returncode
+            except Exception as e:
+                result["line"], result["code"] = f"voices: error {type(e).__name__}", 1
+
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+
+        def wait():
+            if t.is_alive():
+                self.root.after(500, wait)
+                return
+            self.voice_check_running = False
+            line = result.get("line", "")
+            if result.get("code") == 0 and line != "voices: offline":
+                self.last_voice_check = time.time()
+                self.save_settings()
+            self.voice_box.configure(values=[voice_label(x) for x in narrate.available_voices()])
+            msg = {"voices: offline": "Couldn't check for new voices (offline). The installed voices work as usual.",
+                   "voices: not bundled": "Voices download on demand in this install, so they're always current.",
+                   "voices: 0 new; 0 updated": "Voices are up to date."}.get(line)
+            if not msg:
+                msg = (f"Voice update: {line[len('voices: '):]}" if result.get("code") == 0 and line
+                       else "The voice check failed; the installed voices work as usual.")
+            if not self.job:
+                self.status.configure(text=msg)
+
+        wait()
 
     def check_dependencies(self):
         if IS_WINDOWS:
-            refresh_path()      # pick up what winget just installed, without a restart
+            refresh_path()      # pick up what was just installed, without a restart
         missing = []
-        for name, finder in (("LibreOffice", narrate.find_soffice), ("ffmpeg", narrate.find_ffmpeg)):
+        try:
+            narrate.find_ffmpeg()
+        except narrate.Fail:
+            missing.append("ffmpeg")
+        if not narrate.powerpoint_installed():
             try:
-                finder()
+                narrate.find_soffice()
             except narrate.Fail:
-                missing.append(name)
+                missing.append("LibreOffice")
         if not missing:
             self.banner.grid_remove()
             return
-        how = ("Press Install them (uses winget), then Check again." if IS_WINDOWS
-               else "Install them:  sudo apt install libreoffice-impress ffmpeg")
-        self.banner_text.configure(text=f"Missing: {' and '.join(missing)}. Making a video needs both "
-                                        f"(LibreOffice draws the slides, ffmpeg makes the MP4). {how}")
+        if IS_WINDOWS:
+            how = ("Deck Narrator draws slides with PowerPoint or LibreOffice, and this PC has neither. "
+                   "Install LibreOffice installs a minimal copy that leaves Office's file types alone."
+                   if missing == ["LibreOffice"] else
+                   f"Missing: {' and '.join(missing)}. Reinstall Deck Narrator, or set DECK_NARRATOR_FFMPEG.")
+        else:
+            how = (f"Missing: {' and '.join(missing)} (LibreOffice draws the slides, ffmpeg makes the MP4). "
+                   "Install them:  sudo apt install libreoffice-impress ffmpeg")
+        self.banner_text.configure(text=how)
         self.banner.grid()
 
     def form(self):
@@ -482,6 +717,8 @@ class App:
         self.mode = mode
         self.out_lines = []
         self.clear_log()
+        if mode != "sample":
+            self.tabs.select(self.log_tab)
         self.append("> deck-narrator " + " ".join(shlex.quote(a) for a in args))
         self.progress.configure(mode="indeterminate")
         self.progress.start(12)

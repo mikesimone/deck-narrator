@@ -51,10 +51,24 @@ jobs:
         with:
           path: ~\.cache\huggingface
           key: hf-kokoro-82m-v1-win
-      # The runner has no winget, so the two system dependencies come from Chocolatey;
-      # setup.ps1 then finds them and skips its own winget installs.
-      - name: LibreOffice and ffmpeg
-        run: choco install libreoffice-fresh ffmpeg -y --no-progress
+      # LibreOffice comes from our own dependency script (direct download, minimal, Office
+      # file types left alone), so every render below tests that install. ffmpeg (and
+      # ffprobe, for the tests) from Chocolatey; setup.ps1 then skips its winget installs.
+      - name: LibreOffice (install-dependencies.ps1)
+        env:
+          DECK_NARRATOR_NO_PAUSE: "1"
+        run: |
+          .\packaging\install-dependencies.ps1
+          if ($LASTEXITCODE) { Get-Content "$env:TEMP\deck-narrator-libreoffice-install.log" -Tail 80 -ErrorAction SilentlyContinue; throw "install-dependencies.ps1 failed" }
+          $dir = "$env:ProgramFiles\LibreOffice\program"
+          if (-not (Test-Path "$dir\simpress.exe")) { throw "Impress missing" }
+          if (Test-Path "$dir\swriter.exe") { Write-Host "note: swriter.exe stub present (launcher only)" }
+          $assoc = (Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\.pptx" -ErrorAction SilentlyContinue).'(default)'
+          Write-Host ".pptx is associated with: '$assoc'"
+          if ($assoc -like "LibreOffice*") { throw "LibreOffice took over .pptx despite REGISTER_NO_MSO_TYPES=1" }
+          if (Test-Path "$env:PUBLIC\Desktop\LibreOffice*.lnk") { throw "LibreOffice put an icon on the desktop" }
+      - name: ffmpeg (for the tests)
+        run: choco install ffmpeg -y --no-progress
       - name: Setup (setup.ps1)
         run: .\setup.ps1
       - name: Test suite (from source)
@@ -66,6 +80,21 @@ jobs:
           Copy-Item README.md, LICENSE, THIRD-PARTY-NOTICES.md dist\deck-narrator\
           Copy-Item packaging\WINDOWS-STANDALONE.txt dist\deck-narrator\README-FIRST.txt
           Copy-Item -Recurse packaging\licenses dist\deck-narrator\licenses
+          Copy-Item packaging\install-dependencies.ps1, packaging\install-dependencies.cmd dist\deck-narrator\
+      # ffmpeg ships inside the app (dist\deck-narrator\ffmpeg), so users never install it.
+      # gyan.dev's release "essentials" build: GPL-3.0, with libx264 for the H.264 encode.
+      - name: Bundle ffmpeg
+        run: |
+          curl.exe -L --fail --retry 3 -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+          if ($LASTEXITCODE) { throw "ffmpeg download failed" }
+          Expand-Archive ffmpeg.zip ffmpeg-unpacked
+          $src = (Get-ChildItem ffmpeg-unpacked -Directory)[0].FullName
+          New-Item -ItemType Directory dist\deck-narrator\ffmpeg | Out-Null
+          Copy-Item "$src\bin\ffmpeg.exe", "$src\LICENSE" dist\deck-narrator\ffmpeg\
+          Copy-Item "$src\README.txt" dist\deck-narrator\ffmpeg\README.txt -ErrorAction SilentlyContinue
+          $v = & dist\deck-narrator\ffmpeg\ffmpeg.exe -hide_banner -version | Select-Object -First 1
+          Write-Host $v
+          if (-not ((& dist\deck-narrator\ffmpeg\ffmpeg.exe -hide_banner -encoders) -match "libx264")) { throw "bundled ffmpeg has no libx264" }
       - name: Test suite (standalone .exe)
         run: .\.venv\Scripts\python.exe test\verify.py --exe dist\deck-narrator\deck-narrator.exe --device cpu
       - name: Zip
@@ -83,27 +112,49 @@ jobs:
           "VERSION=$version" >> $env:GITHUB_ENV
           dotnet tool install --global wix --version 5.0.2
           wix extension add -g WixToolset.UI.wixext/5.0.2
-          wix build packaging\installer\DeckNarrator.wxs -arch x64 -ext WixToolset.UI.wixext `
+          wix extension add -g WixToolset.Util.wixext/5.0.2
+          wix build packaging\installer\DeckNarrator.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
             -d Version=$version -d AppDir="$PWD\dist\deck-narrator" -o deck-narrator-$version-x64.msi
           if ($LASTEXITCODE) { throw "wix build failed" }
           Get-Item deck-narrator-$version-x64.msi | Format-List Name, Length
       - name: Install MSI
         run: |
-          $p = Start-Process msiexec.exe -ArgumentList "/i", "deck-narrator-$env:VERSION-x64.msi", "/qn", "/l*v", "install.log" -Wait -PassThru
+          $p = Start-Process msiexec.exe -ArgumentList "/i", "deck-narrator-$env:VERSION-x64.msi", "/qn", "INSTALLDEPS=1", "/l*v", "install.log" -Wait -PassThru
           if ($p.ExitCode) { Get-Content install.log -Tail 60; throw "install failed: $($p.ExitCode)" }
           $dir = "$env:ProgramFiles\Deck Narrator"
-          foreach ($f in "deck-narrator.exe", "deck-narrator-gui.exe", "model\kokoro-v1_0.pth", "model\voices\af_heart.pt") {
+          foreach ($f in "deck-narrator.exe", "deck-narrator-gui.exe", "install-dependencies.cmd", "install-dependencies.ps1",
+                      "ffmpeg\ffmpeg.exe", "model\kokoro-v1_0.pth", "model\voices\af_heart.pt") {
             if (-not (Test-Path "$dir\$f")) { throw "not installed: $f" }
           }
           if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Deck Narrator.lnk")) { throw "no Start menu entry" }
           $path = [Environment]::GetEnvironmentVariable("Path", "Machine")
           if (($path -split ";") -notcontains "$dir\") { throw "install folder not on system PATH: $path" }
+          # INSTALLDEPS=1 ran the dependency script after the install; with LibreOffice
+          # already here (installed above) it finds nothing to do.
+          Select-String -Path install.log -Pattern "InstallDependencies" | Select-Object -First 3 | ForEach-Object { $_.Line }
+      - name: Dependency script (installed)
+        env:
+          DECK_NARRATOR_NO_PAUSE: "1"
+        run: |
+          & "$env:ProgramFiles\Deck Narrator\install-dependencies.ps1"
+          if ($LASTEXITCODE) { throw "install-dependencies.ps1 failed: $LASTEXITCODE" }
+          Get-Content "$env:TEMP\deck-narrator-install-dependencies.log" | Select-String "Nothing to install"
       # An empty HuggingFace cache and offline mode: everything must come from the install.
       - name: Test suite (installed, offline)
         env:
           HF_HUB_OFFLINE: "1"
           HF_HOME: ${{ runner.temp }}\empty-hf
-        run: .\.venv\Scripts\python.exe test\verify.py --exe "$env:ProgramFiles\Deck Narrator\deck-narrator.exe" --device cpu
+        run: |
+          .\.venv\Scripts\python.exe test\verify.py --exe "$env:ProgramFiles\Deck Narrator\deck-narrator.exe" --device cpu
+          if ($LASTEXITCODE) { throw "suite failed" }
+          $line = & "$env:ProgramFiles\Deck Narrator\deck-narrator.exe" --update-voices
+          if ($line -ne "voices: offline") { throw "offline voice check said: $line" }
+      - name: Voice update check (installed, online)
+        run: |
+          $exe = "$env:ProgramFiles\Deck Narrator\deck-narrator.exe"
+          $line = & $exe --update-voices
+          Write-Host $line
+          if ($line -ne "voices: 0 new; 0 updated") { throw "a just-built installer should have every current voice: $line" }
       - name: GUI (installed, offline)
         env:
           HF_HUB_OFFLINE: "1"

@@ -39,7 +39,7 @@ exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="deck-narrator", conso
 g = Analysis(
     ["../gui.py"],
     pathex=[".."],
-    datas=[(ICON, ".")],
+    datas=[(ICON, "."), (os.path.join(SPECPATH, "deck-narrator.png"), ".")],
     hiddenimports=["builds"],
     excludes=["torch", "kokoro", "misaki", "spacy", "thinc", "transformers", "numpy", "scipy",
               "soundfile", "huggingface_hub", "pypdfium2", "pptx", "lxml", "matplotlib", "IPython", "pytest"],
