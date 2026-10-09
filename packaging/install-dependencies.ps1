@@ -10,8 +10,11 @@
 # LibreOffice" button runs it. Safe to run again: it does nothing when it isn't needed.
 $ErrorActionPreference = "Stop"
 $Host.UI.RawUI.WindowTitle = "Deck Narrator: installing LibreOffice"
-# A record of the last run, for when the window was closed too soon to read.
-Start-Transcript -Path (Join-Path $env:TEMP "deck-narrator-install-dependencies.log") -Force | Out-Null
+# A record of the last run, for when the window was closed too soon to read. Skipped
+# when another copy of this script is still open and holding the file.
+$transcript = $true
+try { Start-Transcript -Path (Join-Path $env:TEMP "deck-narrator-install-dependencies.log") -Force | Out-Null }
+catch { $transcript = $false }
 
 $Mirror = "https://download.documentfoundation.org/libreoffice/stable/"
 
@@ -80,5 +83,5 @@ if ($env:DECK_NARRATOR_NO_PAUSE -ne "1") {
     Write-Host "`nYou can close this window. If Deck Narrator is open, press Check again."
     Read-Host "Press Enter to close" | Out-Null
 }
-Stop-Transcript | Out-Null
+if ($transcript) { Stop-Transcript | Out-Null }
 if ($failed) { exit 1 } else { exit 0 }

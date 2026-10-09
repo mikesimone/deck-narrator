@@ -135,9 +135,11 @@ jobs:
         env:
           DECK_NARRATOR_NO_PAUSE: "1"
         run: |
-          & "$env:ProgramFiles\Deck Narrator\install-dependencies.ps1"
+          # (The copy INSTALLDEPS=1 started is still open, waiting for Enter: this one must cope.)
+          $out = & "$env:ProgramFiles\Deck Narrator\install-dependencies.ps1" *>&1 | Out-String
+          Write-Host $out
           if ($LASTEXITCODE) { throw "install-dependencies.ps1 failed: $LASTEXITCODE" }
-          Get-Content "$env:TEMP\deck-narrator-install-dependencies.log" | Select-String "Nothing to install"
+          if ($out -notmatch "Nothing to install") { throw "expected it to find LibreOffice already installed" }
       # An empty HuggingFace cache and offline mode: everything must come from the install.
       - name: Test suite (installed, offline)
         env:
