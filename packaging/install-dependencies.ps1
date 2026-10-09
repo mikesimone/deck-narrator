@@ -3,8 +3,8 @@
 # winget needed). ffmpeg isn't needed: it ships inside Deck Narrator.
 #
 # The LibreOffice it installs leaves Microsoft Office alone: REGISTER_NO_MSO_TYPES=1 keeps
-# it from taking over .pptx/.docx/.xlsx, and only its core and Impress (plus Draw, which
-# Impress is built on) are installed, without Writer, Calc, Base or Math. No desktop icon.
+# it from taking over .pptx/.docx/.xlsx, and Base, Math and the online updater are left
+# out. (Writer and Calc stay: without them, Impress's PDF export crashes.) No desktop icon.
 #
 # The Windows installer offers to run this when it finishes, and the GUI's "Install
 # LibreOffice" button runs it. Safe to run again: it does nothing when it isn't needed.
@@ -51,10 +51,10 @@ function Install-LibreOffice {
     # Quiet when already elevated; otherwise a progress bar, so Windows can ask for admin rights.
     $ui = if (Is-Admin) { "/qn" } else { "/passive" }
     $log = Join-Path $env:TEMP "deck-narrator-libreoffice-install.log"
-    Write-Host "Installing LibreOffice (Impress only, Office file types left alone)..."
+    Write-Host "Installing LibreOffice (Office file types left alone)..."
     $p = Start-Process msiexec.exe -Wait -PassThru -ArgumentList @(
         "/i", "`"$msi`"", $ui, "/norestart", "/l*v", "`"$log`"",
-        "ADDLOCAL=ALL", "REMOVE=gm_p_Wrt,gm_p_Calc,gm_p_Base,gm_p_Math,gm_o_Onlineupdate",
+        "ADDLOCAL=ALL", "REMOVE=gm_p_Base,gm_p_Math,gm_o_Onlineupdate",
         "REGISTER_NO_MSO_TYPES=1", "CREATEDESKTOPLINK=0", "ISCHECKFORPRODUCTUPDATES=0", "RebootYesNo=No")
     Remove-Item $msi -ErrorAction SilentlyContinue
     if ($p.ExitCode -notin 0, 3010) { throw "the LibreOffice installer failed (exit $($p.ExitCode)); its log is $log" }
