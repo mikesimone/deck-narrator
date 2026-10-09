@@ -62,7 +62,6 @@ jobs:
           if ($LASTEXITCODE) { Get-Content "$env:TEMP\deck-narrator-libreoffice-install.log" -Tail 80 -ErrorAction SilentlyContinue; throw "install-dependencies.ps1 failed" }
           $dir = "$env:ProgramFiles\LibreOffice\program"
           if (-not (Test-Path "$dir\simpress.exe")) { throw "Impress missing" }
-          if (Test-Path "$dir\swriter.exe") { Write-Host "note: swriter.exe stub present (launcher only)" }
           $assoc = (Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\.pptx" -ErrorAction SilentlyContinue).'(default)'
           Write-Host ".pptx is associated with: '$assoc'"
           if ($assoc -like "LibreOffice*") { throw "LibreOffice took over .pptx despite REGISTER_NO_MSO_TYPES=1" }

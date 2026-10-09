@@ -56,8 +56,8 @@ and installs only what Deck Narrator uses, leaving Office alone:
 
 - `REGISTER_NO_MSO_TYPES=1`: LibreOffice doesn't take over `.pptx`, `.docx` or `.xlsx`, so
   they keep opening in Office.
-- Only the core and Impress (with Draw, which Impress is built on): no Writer, Calc, Base,
-  Math or online updater. No desktop icon.
+- No Base, Math or online updater, and no desktop icon. (Writer and Calc stay, because
+  Impress's PDF export crashes without them.)
 
 A silent install that does the same: `msiexec /i deck-narrator-<version>-x64.msi /qn INSTALLDEPS=1`.
 
