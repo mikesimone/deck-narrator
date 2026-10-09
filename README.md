@@ -157,6 +157,9 @@ options (the log's first line shows the exact command), so the two always behave
 same. Your choices are remembered between runs (`%APPDATA%\deck-narrator\gui.json` on
 Windows, `~/.config/deck-narrator/gui.json` on Linux).
 
+**To try it:** open `examples/demo-deck.pptx`, a five-slide deck whose notes use animation
+builds and three voices (it's the deck the tests use), and press **Make video**.
+
 **Desktop folders:** like the command line, it won't save a video into a Desktop folder
 unless you tick **Allow saving to a Desktop folder**.
 
@@ -590,6 +593,7 @@ The test outputs (`test/*-deck.pptx`, `test/*-deck.mp4`) are gitignored.
 | `test/make_test_deck.py` | Builds the narration test deck |
 | `test/make_anim_deck.py` | Builds the animation/voices test deck (and a PowerPoint-format timing writer the unit tests reuse) |
 | `test/pronunciations.txt` | Example pronunciation file |
+| `examples/demo-deck.pptx` | A small deck to try: builds, `[click]`s and three voices (a copy of the test suite's `anim-deck.pptx`) |
 
 ## Known limits
 
