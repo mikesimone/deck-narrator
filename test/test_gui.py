@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""Unit tests for gui.py's command building: no display, no model, no LibreOffice.
+
+The GUI runs the CLI, so what matters is that it can reach every CLI option and
+builds the command line the CLI expects. The window itself is exercised by
+test/gui_smoke.py (Linux, virtual display) and by CI on Windows (installed MSI).
+"""
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import narrate  # noqa: E402
+
+try:
+    import gui  # noqa: E402
+except ImportError as e:            # a Python built without tkinter
+    gui = None
+    REASON = str(e)
+
+
+def form(**over):
+    f = {"deck": "/decks/talk.pptx", "output": "", "voice": "af_heart", "speed": "1.0", "device": "auto",
+         "pronunciations": "", "slides": "", "pad": "0.75", "empty_duration": "3.0", "build_hold": "1.0",
+         "skip_empty": False, "no_builds": False, "keep_temp": False, "allow_desktop": False,
+         "sample_text": "Hello", "phonemes_text": "", "sample_out": "/tmp/s.wav"}
+    f.update(over)
+    return f
+
+
+@unittest.skipIf(gui is None, "tkinter not available")
+class GuiCoversCli(unittest.TestCase):
+    def test_every_cli_option_has_a_control(self):
+        dests = {a.dest for a in narrate.build_parser()._actions}
+        self.assertEqual(dests - gui.COVERED, set(), "CLI options the GUI can't set")
+        self.assertEqual(gui.COVERED - dests, set(), "GUI claims options the CLI doesn't have")
+
+
+@unittest.skipIf(gui is None, "tkinter not available")
+class BuildArgs(unittest.TestCase):
+    def parse(self, args):
+        return narrate.build_parser().parse_args(args)
+
+    def test_video_defaults_parse_to_cli_defaults(self):
+        a = self.parse(gui.build_args(form(), "video"))
+        d = self.parse(["/decks/talk.pptx"])
+        for k in ("deck", "voice", "speed", "pad", "empty_duration", "build_hold", "device",
+                  "skip_empty", "no_builds", "keep_temp", "output", "slides", "pronunciations"):
+            self.assertEqual(getattr(a, k), getattr(d, k), k)
+
+    def test_video_every_option(self):
+        a = self.parse(gui.build_args(form(output="/out/v.mp4", voice="bm_george", speed="1.2", device="cpu",
+                                           pronunciations="/p.txt", slides="1, 3-4", pad="0.5",
+                                           empty_duration="2", build_hold="1.5", skip_empty=True,
+                                           no_builds=True, keep_temp=True), "video"))
+        self.assertEqual((a.output, a.voice, a.speed, a.device, a.pronunciations), ("/out/v.mp4", "bm_george", 1.2, "cpu", "/p.txt"))
+        self.assertEqual(a.slides, {1, 3, 4})
+        self.assertEqual((a.pad, a.empty_duration, a.build_hold), (0.5, 2.0, 1.5))
+        self.assertTrue(a.skip_empty and a.no_builds and a.keep_temp)
+
+    def test_show_modes(self):
+        self.assertTrue(self.parse(gui.build_args(form(), "builds")).show_builds)
+        self.assertTrue(self.parse(gui.build_args(form(), "phonemes")).show_phonemes)
+        a = self.parse(gui.build_args(form(phonemes_text="a present"), "phonemes_text"))
+        self.assertEqual((a.phonemes, a.deck), ("a present", None))
+
+    def test_sample(self):
+        a = self.parse(gui.build_args(form(sample_text="Hi there", voice="am_adam", speed="0.9"), "sample"))
+        self.assertEqual((a.sample, a.voice, a.speed, a.output, a.deck), ("Hi there", "am_adam", 0.9, "/tmp/s.wav", None))
+
+    def test_missing_inputs_are_user_errors(self):
+        with self.assertRaises(ValueError):
+            gui.build_args(form(deck=""), "video")
+        with self.assertRaises(ValueError):
+            gui.build_args(form(sample_text="  "), "sample")
+        with self.assertRaises(ValueError):
+            gui.build_args(form(phonemes_text=""), "phonemes_text")
+
+    def test_voice_labels_round_trip(self):
+        for v in narrate.KNOWN_VOICES:
+            self.assertEqual(gui.voice_from_label(gui.voice_label(v)), v)
+
+
+if __name__ == "__main__":
+    unittest.main()

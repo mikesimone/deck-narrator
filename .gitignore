@@ -7,3 +7,4 @@ test/*.pptx
 # PyInstaller
 build/
 dist/
+model/

@@ -1,0 +1,57 @@
+<!--
+  Windows installer (MSI) for deck-narrator, built with WiX Toolset v5 by
+  .github/workflows/ci.yml from the PyInstaller folder (packaging/deck-narrator.spec)
+  plus the bundled voice model (packaging/fetch_model.py). Build by hand:
+
+    wix extension add -g WixToolset.UI.wixext/5.0.2
+    wix build packaging\installer\DeckNarrator.wxs -arch x64 -ext WixToolset.UI.wixext
+        -d Version=1.1.0 -d AppDir=dist\deck-narrator -o deck-narrator.msi
+
+  Installs to Program Files\Deck Narrator for all users, adds a Start menu entry for the
+  GUI and puts the folder on the system PATH (for deck-narrator.exe). Nothing on the
+  desktop. Uninstall removes all of it.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="Deck Narrator" Manufacturer="Mike Simone" Version="$(Version)"
+           UpgradeCode="ec79f82d-4328-41b7-9706-760957afb3c5" Scope="perMachine" Compressed="yes">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Deck Narrator is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon" SourceFile="$(sys.SOURCEFILEDIR)..\deck-narrator.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/mikesimone/deck-narrator" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)license.rtf" />
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Deck Narrator" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="GuiShortcut" Name="Deck Narrator" Description="Turn a PowerPoint deck's speaker notes into a narrated video"
+                  Target="[INSTALLFOLDER]deck-narrator-gui.exe" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+        <RegistryValue Root="HKLM" Key="Software\Deck Narrator" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Deck Narrator">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="SystemPath" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="$(AppDir)\**" />
+    </ComponentGroup>
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="SystemPath">
+        <Environment Id="PathEntry" Name="PATH" Value="[INSTALLFOLDER]" Part="last" Action="set" System="yes" Permanent="no" />
+        <RegistryValue Root="HKLM" Key="Software\Deck Narrator" Name="SystemPath" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>
