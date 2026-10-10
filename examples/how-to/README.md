@@ -9,7 +9,7 @@ deck-narrator examples/how-to/deck-narrator-how-to.pptx
 
 or open it in the GUI and press **Make video**. The result is about 8 minutes long; it took
 under 6 minutes on a 4-core CPU with no GPU. The finished video is
-[`deck-narrator-how-to.mp4`](deck-narrator-how-to.mp4), right here.
+[`deck-narrator-how-to-1.2.5.mp4`](deck-narrator-how-to-1.2.5.mp4), right here.
 
 What's in it:
 
