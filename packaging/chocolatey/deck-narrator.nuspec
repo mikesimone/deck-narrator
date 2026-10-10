@@ -10,7 +10,7 @@
     <owners>mikesimone</owners>
     <projectUrl>https://github.com/mikesimone/deck-narrator</projectUrl>
     <packageSourceUrl>https://github.com/mikesimone/deck-narrator/tree/main/packaging/chocolatey</packageSourceUrl>
-    <projectSourceUrl>https://github.com/mikesimone/deck-narrator</projectSourceUrl>
+    <projectSourceUrl>https://github.com/mikesimone/deck-narrator/tree/v__VERSION__</projectSourceUrl>
     <docsUrl>https://github.com/mikesimone/deck-narrator#readme</docsUrl>
     <bugTrackerUrl>https://github.com/mikesimone/deck-narrator/issues</bugTrackerUrl>
     <releaseNotes>https://github.com/mikesimone/deck-narrator/releases/tag/v__VERSION__</releaseNotes>
