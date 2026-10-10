@@ -5,7 +5,7 @@ no paid services, no API keys. The voice is
 [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), running locally on the GPU,
 or on the CPU if there isn't one.
 
-**Watch the how-to (6 minutes):** a tour of the Windows app, narrated by Deck Narrator
+**Watch the how-to (8 minutes):** a tour of the Windows app, narrated by Deck Narrator
 itself from [its own deck](examples/how-to/).
 
 [![Deck Narrator how-to video](examples/how-to/deck-narrator-how-to.jpg)](examples/how-to/deck-narrator-how-to.mp4)
@@ -686,7 +686,7 @@ The test outputs (`test/*-deck.pptx`, `test/*-deck.mp4`) are gitignored.
 | `test/make_anim_deck.py` | Builds the animation/voices test deck (and a PowerPoint-format timing writer the unit tests reuse) |
 | `test/pronunciations.txt` | Example pronunciation file |
 | `examples/demo-deck.pptx` | A small deck to try: builds, `[click]`s and three voices (a copy of the test suite's `anim-deck.pptx`) |
-| `examples/how-to/` | A how-to deck about the app itself (1.2.1): screenshots with builds, notes in deck-narrator syntax, and embedded screen recordings; run it through deck-narrator for a narrated tour. `deck-narrator-how-to.mp4` is that video (linked at the top of this README) |
+| `examples/how-to/` | A how-to deck about the app itself (1.2.5): many screenshots revealed by builds, and notes in deck-narrator syntax whose narration demonstrates each sound; run it through deck-narrator for a narrated tour. `deck-narrator-how-to.mp4` is that video (linked at the top of this README) |
 
 ## Known limits
 
