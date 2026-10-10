@@ -82,5 +82,27 @@ class BuildArgs(unittest.TestCase):
             self.assertEqual(gui.voice_from_label(gui.voice_label(v)), v)
 
 
+class Updates(unittest.TestCase):
+    def release(self, tag, digest="sha256:" + "ab" * 32):
+        return {"tag_name": tag, "assets": [
+            {"name": "deck-narrator-windows-x64.zip", "browser_download_url": "https://x/zip", "size": 1},
+            {"name": f"deck-narrator-{tag[1:]}-x64.msi", "browser_download_url": "https://x/msi",
+             "size": 590_000_000, "digest": digest}]}
+
+    def test_only_newer_releases_count(self):
+        u = gui.update_from_release(self.release("v1.10.0"), "1.9.3")
+        self.assertEqual((u["version"], u["url"], u["sha256"]), ("1.10.0", "https://x/msi", "ab" * 32))
+        self.assertIsNone(gui.update_from_release(self.release("v1.2.1"), "1.2.1"))
+        self.assertIsNone(gui.update_from_release(self.release("v1.2.0"), "1.2.1"))
+        self.assertIsNone(gui.update_from_release({"tag_name": "v9.0.0", "assets": []}, "1.2.1"))
+        self.assertIsNone(gui.update_from_release({}, "1.2.1"))
+
+    def test_missing_checksum_is_reported_as_none(self):
+        self.assertIsNone(gui.update_from_release(self.release("v2.0.0", digest=None), "1.2.1")["sha256"])
+
+    def test_only_the_installed_copy_updates_itself(self):
+        self.assertFalse(gui.installed_by_msi())       # tests run from source
+
+
 if __name__ == "__main__":
     unittest.main()

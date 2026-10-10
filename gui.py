@@ -253,6 +253,36 @@ def refresh_path():
         os.environ["PATH"] = ";".join(parts)
 
 
+RELEASES_API = "https://api.github.com/repos/mikesimone/deck-narrator/releases/latest"
+RELEASES_PAGE = "https://github.com/mikesimone/deck-narrator/releases/latest"
+
+
+def version_tuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", v or "")[:3])
+
+
+def update_from_release(release, current):
+    """The newer installer in a GitHub releases/latest answer, as {version, url, sha256,
+    size}, or None when it isn't newer than current or has no MSI."""
+    tag = release.get("tag_name") or ""
+    if not version_tuple(tag) or version_tuple(tag) <= version_tuple(current):
+        return None
+    msi = next((a for a in release.get("assets") or [] if a.get("name", "").endswith("-x64.msi")), None)
+    if not msi:
+        return None
+    digest = msi.get("digest") or ""
+    return {"version": tag.lstrip("v"), "url": msi.get("browser_download_url"), "size": msi.get("size") or 0,
+            "sha256": digest[len("sha256:"):] if digest.startswith("sha256:") else None}
+
+
+def installed_by_msi():
+    """True for the copy the Windows installer put in Program Files (the one an update replaces)."""
+    if not (IS_WINDOWS and FROZEN):
+        return False
+    pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+    return Path(sys.executable).parent.resolve() == (Path(pf) / "Deck Narrator").resolve()
+
+
 def open_path(path):
     """Open a file or folder with the system's default app."""
     if IS_WINDOWS:
@@ -508,10 +538,12 @@ class App:
             "sample_text": tk.StringVar(value=narrate.DEFAULT_SAMPLE_TEXT),
             "phonemes_text": tk.StringVar(),
             "check_voices": tk.BooleanVar(value=True),
+            "check_updates": tk.BooleanVar(value=True),
             "renderer": tk.StringVar(value="auto"),
             "tab": tk.StringVar(value="0"),
         }
         self.last_voice_check = 0.0
+        self.last_update_check = 0.0
         self.load_settings()
         self.build()
         self.fit_to_screen()
@@ -519,6 +551,8 @@ class App:
         root.protocol("WM_DELETE_WINDOW", self.quit)
         if self.v["check_voices"].get() and not selftest:
             root.after(1500, self.check_voices)
+        if self.v["check_updates"].get() and not selftest:
+            root.after(2500, self.check_updates)
 
     def fit_to_screen(self):
         """Open at the layout's natural size, but never taller or wider than the screen's
@@ -550,6 +584,7 @@ class App:
         ttk.Label(head, text=TITLE, style="Title.TLabel").pack(side="left")
         ttk.Label(head, text=f"  {narrate.VERSION}  ·  speaker notes to narrated video", style="Hint.TLabel").pack(
             side="left", pady=(6, 0))
+        self.update_btn = ttk.Button(head, style="Accent.TButton", command=self.do_update)   # shown when there's one
 
         self.banner = ttk.Frame(outer)
         self.banner.grid(row=1, column=0, sticky="ew")
@@ -649,6 +684,11 @@ class App:
                      values=["auto", "cuda", "cpu"]).grid(row=4, column=1, sticky="w", **pad)
         ttk.Label(opts, text="auto = NVIDIA GPU if there is one", style="Hint.TLabel").grid(
             row=4, column=2, columnspan=2, sticky="w", **pad)
+        upd = ttk.Frame(opts)
+        upd.grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(upd, text="Check for Deck Narrator updates at startup",
+                        variable=self.v["check_updates"]).pack(side="left", padx=4)
+        ttk.Button(upd, text="Check now", command=lambda: self.check_updates(force=True)).pack(side="left", padx=4)
 
         logtab = ttk.Frame(self.tabs, padding=(4, 4))
         self.tabs.add(logtab, text="  Log  ")
@@ -694,7 +734,7 @@ class App:
     # ------------------------------------------------------------ settings
 
     SAVED = ("voice", "speed", "device", "pronunciations", "pad", "empty_duration", "build_hold",
-             "skip_empty", "no_builds", "keep_temp", "allow_desktop", "sample_text", "check_voices", "renderer")
+             "skip_empty", "no_builds", "keep_temp", "allow_desktop", "sample_text", "check_voices", "renderer", "check_updates")
 
     def load_settings(self):
         self.last_dir = str(Path.home())
@@ -713,6 +753,7 @@ class App:
             self.v["sample_text"].set(narrate.DEFAULT_SAMPLE_TEXT)
         self.v["tab"].set(str(data.get("tab", 0)))
         self.last_voice_check = float(data.get("last_voice_check", 0) or 0)
+        self.last_update_check = float(data.get("last_update_check", 0) or 0)
 
     def save_settings(self):
         data = {k: self.v[k].get() for k in self.SAVED}
@@ -722,6 +763,7 @@ class App:
             pass
         data["last_dir"] = self.last_dir
         data["last_voice_check"] = self.last_voice_check
+        data["last_update_check"] = self.last_update_check
         try:
             config_path().parent.mkdir(parents=True, exist_ok=True)
             config_path().write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -838,6 +880,122 @@ class App:
                        else "The voice check failed; the installed voices work as usual.")
             if not self.job:
                 self.status.configure(text=msg)
+
+        wait()
+
+    UPDATE_CHECK_EVERY = 24 * 3600
+
+    def check_updates(self, force=False):
+        """Ask GitHub for the latest release, in the background, at most once a day unless
+        forced. A newer one shows an "Update to x.y.z" button in the header."""
+        import time
+        if getattr(self, "update_check_running", False):
+            return
+        if not force and time.time() - self.last_update_check < self.UPDATE_CHECK_EVERY:
+            return
+        self.update_check_running = True
+        result = {}
+
+        def work():
+            import urllib.request
+            try:
+                req = urllib.request.Request(RELEASES_API, headers={
+                    "User-Agent": f"deck-narrator/{narrate.VERSION}", "Accept": "application/vnd.github+json"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    result["update"] = update_from_release(json.loads(r.read().decode("utf-8")), narrate.VERSION)
+                result["ok"] = True
+            except Exception as e:
+                result["error"] = f"{type(e).__name__}: {e}"
+
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+
+        def wait():
+            if t.is_alive():
+                self.root.after(500, wait)
+                return
+            self.update_check_running = False
+            if result.get("ok"):
+                self.last_update_check = time.time()
+                self.save_settings()
+            self.update = result.get("update")
+            if self.update:
+                self.update_btn.configure(text=f"Update to {self.update['version']}")
+                self.update_btn.pack(side="right")
+                if not self.job:
+                    self.status.configure(text=f"Deck Narrator {self.update['version']} is available.")
+            elif force and not self.job:
+                self.status.configure(text="Deck Narrator is up to date." if result.get("ok") else
+                                      "Couldn't check for updates (offline?).")
+
+        wait()
+
+    def do_update(self):
+        """Download the newer MSI, check it against the SHA-256 GitHub lists for it, then
+        quit and let it replace this install; Deck Narrator opens again when it's done.
+        Copies not installed by the MSI (zip, source) get the download page instead."""
+        u = getattr(self, "update", None)
+        if not u:
+            return
+        if not installed_by_msi() or not u.get("sha256"):
+            import webbrowser
+            webbrowser.open(RELEASES_PAGE)
+            return
+        if self.job:
+            messagebox.showinfo(TITLE, "Wait for the current job to finish (or cancel it) first.")
+            return
+        size = f" (about {u['size'] // 1_000_000} MB)" if u.get("size") else ""
+        if not messagebox.askyesno(TITLE, f"Download and install Deck Narrator {u['version']}{size}?\n\n"
+                                          "Deck Narrator closes while it installs, and opens again afterwards."):
+            return
+        msi = Path(tempfile.gettempdir()) / f"deck-narrator-{u['version']}-x64.msi"
+        state = {"got": 0}
+        self.update_btn.configure(state="disabled")
+
+        def work():
+            import hashlib
+            import urllib.request
+            try:
+                h = hashlib.sha256()
+                part = msi.with_name(msi.name + ".part")
+                req = urllib.request.Request(u["url"], headers={"User-Agent": f"deck-narrator/{narrate.VERSION}"})
+                with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
+                    for block in iter(lambda: r.read(1 << 20), b""):
+                        f.write(block)
+                        h.update(block)
+                        state["got"] += len(block)
+                if h.hexdigest() != u["sha256"]:
+                    part.unlink()
+                    raise ValueError("the download doesn't match the checksum GitHub lists for it")
+                os.replace(part, msi)
+                state["done"] = True
+            except Exception as e:
+                state["error"] = str(e)
+
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+
+        def wait():
+            if t.is_alive():
+                total = u.get("size") or 0
+                pct = f" {100 * state['got'] // total}%" if total else ""
+                self.status.configure(text=f"Downloading Deck Narrator {u['version']}...{pct}")
+                self.root.after(500, wait)
+                return
+            if not state.get("done"):
+                self.update_btn.configure(state="normal")
+                self.status.configure(text=f"The update didn't download: {state.get('error')}")
+                return
+            gui = Path(sys.executable)
+            script = msi.with_suffix(".cmd")
+            script.write_text(
+                "@echo off\r\n"
+                f'msiexec /i "{msi}" /passive /norestart\r\n'
+                f'if %errorlevel%==0 start "" "{gui}"\r\n'
+                f'if %errorlevel%==3010 start "" "{gui}"\r\n', encoding="utf-8")
+            subprocess.Popen(["cmd", "/c", str(script)], creationflags=subprocess.CREATE_NO_WINDOW)
+            self.save_settings()
+            self.root.destroy()
 
         wait()
 
