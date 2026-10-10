@@ -6,16 +6,17 @@
     wix extension add -g WixToolset.UI.wixext/5.0.2
     wix extension add -g WixToolset.Util.wixext/5.0.2
     wix build packaging\installer\DeckNarrator.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext
-        -d Version=1.2.0 -d AppDir=dist\deck-narrator -o deck-narrator.msi
+        -d Version=1.2.5 -d AppDir=dist\deck-narrator -o deck-narrator.msi
 
   Installs to Program Files\Deck Narrator for all users, adds a Start menu entry for the
   GUI and puts the folder on the system PATH (for deck-narrator.exe). Nothing on the
   desktop. Uninstall removes all of it.
 
-  ffmpeg is in the app folder. The finish page has a checkbox (on by default) that runs
-  install-dependencies.cmd: when neither PowerPoint nor LibreOffice is installed, it
+  ffmpeg is in the app folder. When neither PowerPoint nor LibreOffice is installed, the
+  finish page has a checkbox (on by default) that runs install-dependencies.cmd, which
   downloads LibreOffice and installs a minimal copy that leaves Office's file types alone.
-  For a silent install, ask for the same with INSTALLDEPS=1:
+  When either one is there, nothing is needed, so the checkbox isn't shown at all.
+  For a silent install, ask for the same with INSTALLDEPS=1 (also skipped when either is there):
     msiexec /i deck-narrator.msi /qn INSTALLDEPS=1
   Either way it runs after the install has finished, so it can't fail the install.
 -->
@@ -34,14 +35,25 @@
     <WixVariable Id="WixUIBannerBmp" Value="$(sys.SOURCEFILEDIR)banner.bmp" />
     <WixVariable Id="WixUIDialogBmp" Value="$(sys.SOURCEFILEDIR)dialog.bmp" />
 
-    <!-- Dependencies: a checkbox on the finish page (first install only), or INSTALLDEPS=1. -->
-    <SetProperty Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Sequence="ui" Before="CostFinalize" Condition="NOT Installed"
-                 Value="Install LibreOffice if it's needed (only when PowerPoint isn't installed; leaves Office alone)" />
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <!-- Is something that can draw slides already here? PowerPoint registers its COM class,
+         LibreOffice its install path; both looked for in the 64- and 32-bit registry. -->
+    <Property Id="PPT64"><RegistrySearch Root="HKCR" Key="PowerPoint.Application\CLSID" Type="raw" Bitness="always64" /></Property>
+    <Property Id="PPT32"><RegistrySearch Root="HKCR" Key="PowerPoint.Application\CLSID" Type="raw" Bitness="always32" /></Property>
+    <Property Id="LO64"><RegistrySearch Root="HKLM" Key="SOFTWARE\LibreOffice\UNO\InstallPath" Type="raw" Bitness="always64" /></Property>
+    <Property Id="LO32"><RegistrySearch Root="HKLM" Key="SOFTWARE\LibreOffice\UNO\InstallPath" Type="raw" Bitness="always32" /></Property>
+    <SetProperty Id="HAVE_RENDERER" Value="1" Sequence="both" After="AppSearch" Condition="PPT64 OR PPT32 OR LO64 OR LO32" />
+
+    <!-- Dependencies: a checkbox on the finish page (first install, and only when neither
+         PowerPoint nor LibreOffice is here; otherwise it isn't shown), or INSTALLDEPS=1. -->
+    <SetProperty Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Sequence="ui" Before="CostFinalize"
+                 Condition="NOT Installed AND NOT (PPT64 OR PPT32 OR LO64 OR LO32)"
+                 Value="Install LibreOffice to draw the slides (PowerPoint isn't installed; leaves Office's file types alone)" />
+    <SetProperty Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Sequence="ui" Before="CostFinalize"
+                 Condition="NOT Installed AND NOT (PPT64 OR PPT32 OR LO64 OR LO32)" Value="1" />
     <Property Id="WixShellExecTarget" Value="[INSTALLFOLDER]install-dependencies.cmd" />
     <CustomAction Id="InstallDependencies" BinaryRef="Wix4UtilCA_X64" DllEntry="WixShellExec" Impersonate="yes" Return="ignore" />
     <InstallExecuteSequence>
-      <Custom Action="InstallDependencies" After="InstallFinalize" Condition="INSTALLDEPS = &quot;1&quot; AND NOT Installed AND UILevel &lt; 5" />
+      <Custom Action="InstallDependencies" After="InstallFinalize" Condition="INSTALLDEPS = &quot;1&quot; AND NOT Installed AND NOT HAVE_RENDERER AND UILevel &lt; 5" />
     </InstallExecuteSequence>
 
     <UI>
