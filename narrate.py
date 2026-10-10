@@ -23,7 +23,7 @@ from pathlib import Path
 
 import builds as anim
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 SAMPLE_RATE = 24000          # Kokoro's native output rate
 FPS = 30
 WIDTH, HEIGHT = 1920, 1080
@@ -113,6 +113,13 @@ def build_parser():
                    help="what draws the slides (default: auto = PowerPoint if it's installed, else LibreOffice)")
     p.add_argument("--show-phonemes", action="store_true", help="print each selected slide's script as phonemes, with voices and clicks, and exit (no video)")
     p.add_argument("--phonemes", metavar="TEXT", help="print the phonemes for TEXT and exit, e.g. --phonemes 'a present'")
+    p.add_argument("--check-pronunciation", action="store_true",
+                   help="list the words in the selected slides' notes that may be said wrong (more than one "
+                        "pronunciation, not in the dictionary, or spelled out), with the choices, and exit (no video)")
+    p.add_argument("--json", action="store_true", help="with --check-pronunciation: print JSON instead")
+    p.add_argument("--fix-word", nargs=4, metavar=("SLIDE", "WORD", "N", "PHONEMES"),
+                   help="write [WORD](/PHONEMES/) in place of the N-th WORD in slide SLIDE's notes, saving the deck "
+                        "(the original is kept once as '<deck> (before deck-narrator).pptx'), and exit")
     p.add_argument("--sample", metavar="TEXT", help="speak TEXT with --voice, --speed and --pronunciations into a WAV and exit "
                    "(-o names the .wav; default: deck-narrator-sample.wav in the temp folder)")
     p.add_argument("--keep-temp", action="store_true", help="keep the intermediate files and print where they are")
@@ -893,6 +900,265 @@ def resolve_output(deck_path, output):
     return out
 
 
+# ---------------------------------------------------------------- pronunciation check
+
+G2PS = {}
+
+
+def g2p_for(lang):
+    """Kokoro's phonemizer for a language, without loading the voice model (fast, offline).
+    Returns (g2p, fallback_hits): fallback_hits collects the words misaki didn't know and
+    handed to espeak, since the last time the caller cleared it."""
+    if lang not in G2PS:
+        import warnings
+        warnings.filterwarnings("ignore")
+        from kokoro import KPipeline
+        try:
+            g2p = KPipeline(lang_code=lang, repo_id=REPO_ID, model=False).g2p
+        except ModuleNotFoundError as e:
+            raise Fail(f"{LANG_NAMES[lang]} needs an extra package that isn't installed: {e}")
+        hits = []
+        if getattr(g2p, "fallback", None) is not None:
+            real = g2p.fallback
+
+            def fallback(tk, real=real, hits=hits):
+                hits.append(tk.text)
+                return real(tk)
+            g2p.fallback = fallback
+        G2PS[lang] = (g2p, hits)
+    return G2PS[lang]
+
+
+def phonemize(voice, text):
+    """What Kokoro will say for text with this voice's language, in its phoneme alphabet."""
+    check_voice_name(voice, "--voice")
+    return g2p_for(voice[0])[0](text)[0]
+
+
+# The lexicon's part-of-speech keys that pick between pronunciations, and what to call them.
+POS_LABELS = {"DEFAULT": "usual", "NOUN": "noun", "VERB": "verb", "ADJ": "adjective", "ADV": "adverb",
+              "VBD": "past tense", "VBN": "past participle", "VBP": "present tense"}
+WORDLIKE = re.compile(r"[A-Za-z][A-Za-z'’.-]*")
+SENTENCE = re.compile(r"(?<=[.!?…])\s+")
+# Common words with two pronunciations that the lexicon lists only one way (American).
+EXTRA_HETERONYMS = {
+    "lead": [("lˈid", "to guide"), ("lˈɛd", "the metal")],
+    "row": [("ɹˈO", "a line; to paddle"), ("ɹˈW", "an argument")],
+    "polish": [("pˈɑlɪʃ", "to shine"), ("pˈOlɪʃ", "from Poland")],
+    "address": [("ədɹˈɛs", "verb; British noun"), ("ˈædɹɛs", "noun (American)")],
+    "resume": [("ɹəzˈum", "to continue"), ("ɹˈɛzəmˌA", "a CV")],
+    "sewer": [("sˈuəɹ", "drain"), ("sˈOəɹ", "someone who sews")],
+}
+
+
+def heteronym_options(g2p, word):
+    """[(phonemes, label)] when the lexicon has more than one pronunciation for word, else []."""
+    if word.lower() in EXTRA_HETERONYMS and not getattr(g2p.lexicon, "british", False):
+        return list(EXTRA_HETERONYMS[word.lower()])
+    lex = g2p.lexicon
+    entry = None
+    for w in (word, word.lower(), word.capitalize()):
+        entry = lex.golds.get(w) or lex.silvers.get(w)
+        if entry is not None:
+            break
+    if not isinstance(entry, dict):
+        return []
+    by_ps = {}
+    for tag, ps in entry.items():
+        if ps and tag in POS_LABELS:
+            by_ps.setdefault(ps, []).append(POS_LABELS[tag])
+    if len(by_ps) < 2:
+        return []
+    return [(ps, " / ".join([l for l in labels if l != "present tense"][:2] or labels[:1]))
+            for ps, labels in by_ps.items()]
+
+
+def nth_word_span(text, word, n):
+    """(start, end) of the n-th (1-based) whole-word, case-insensitive occurrence of word
+    in text, not counting ones inside other square-bracket stage directions. None if absent."""
+    hidden = [m.span() for m in BRACKETED.finditer(text)]
+    k = 0
+    for m in re.finditer(rf"(?<![\w'’]){re.escape(word)}(?![\w'’])", text, re.I):
+        if any(a <= m.start() < b for a, b in hidden):
+            continue
+        k += 1
+        if k == n:
+            return m.span()
+    return None
+
+
+def with_override(text, word, n, phonemes):
+    """text with the n-th occurrence of word (see nth_word_span) as [word](/phonemes/)."""
+    span = nth_word_span(text, word, n)
+    if span is None:
+        return None
+    a, b = span
+    if text[b:b + 2] == "](" and text[:a].endswith("["):           # already an override: replace it
+        end = text.index(")", b) + 1
+        return text[:a - 1] + f"[{text[a:b]}](/{phonemes}/)" + text[end:]
+    return text[:a] + f"[{text[a:b]}](/{phonemes}/)" + text[b:]
+
+
+def pronunciation_issues(slides):
+    """Words in the slides' scripts that may come out wrong: heteronyms (one spelling, more
+    than one pronunciation, picked from the sentence's grammar), words the lexicon doesn't
+    know (guessed by espeak), and all-capitals words that are spelled out letter by letter.
+    Words already fixed with [word](/phonemes/) are left out. Each issue says where it is
+    (slide, word, n = which occurrence of the word in that slide's notes) so fix_word can
+    change exactly that one."""
+    issues = []
+    for s in slides:
+        counts = {}
+        for part in s["parts"]:
+            g2p, hits = g2p_for(part["voice"][0])
+            for sentence in [x for x in SENTENCE.split(part["text"]) if x.strip()]:
+                hits.clear()
+                _, tokens = g2p(sentence)
+                unknown = {h.lower() for h in hits}
+                in_sentence = {}
+                for tk in tokens:
+                    word = tk.text
+                    if not WORDLIKE.fullmatch(word):
+                        continue
+                    key = word.lower()
+                    counts[key] = counts.get(key, 0) + 1
+                    in_sentence[key] = in_sentence.get(key, 0) + 1
+                    if tk._.rating == 5:                    # an override: already decided
+                        continue
+                    options = heteronym_options(g2p, word)
+                    if options:
+                        kind = "heteronym"
+                    elif key in unknown:
+                        kind, options = "unknown", [(tk.phonemes, "best guess")]
+                    elif (word.isupper() and len(word) > 3 and re.search("[AEIOUY]", word)
+                          and tk.phonemes and tk.phonemes.count("ˌ") >= len(word) - 1):
+                        # an all-capitals word that could be said as a word (OPSWAT, NIST), spelled
+                        # out instead; short or vowel-less ones (GPU, HTTP) are meant to be spelled
+                        kind, options = "spelled", [(tk.phonemes, "spelled out")]
+                    else:
+                        continue
+                    if tk.phonemes and all(ps != tk.phonemes for ps, _ in options):
+                        options.insert(0, (tk.phonemes, "what it says now"))
+                    issues.append({
+                        "slide": s["number"], "word": word, "n": counts[key], "n_in_sentence": in_sentence[key],
+                        "kind": kind,
+                        "voice": part["voice"], "sentence": sentence, "current": tk.phonemes or "",
+                        "options": [{"phonemes": ps, "label": label,
+                                     "say": with_override(sentence, word, in_sentence[key], ps)}
+                                    for ps, label in options],
+                    })
+    return issues
+
+
+def print_issues(issues):
+    kinds = {"heteronym": "can be said more than one way", "unknown": "not in the dictionary; guessed",
+             "spelled": "all capitals, so it's spelled out letter by letter"}
+    if not issues:
+        print("No likely pronunciation problems found.")
+        return
+    for i in issues:
+        print(f"slide {i['slide']}: {i['word']!r} ({kinds[i['kind']]}), now /{i['current']}/")
+        print(f"    {i['sentence']}")
+        for o in i["options"]:
+            print(f"    /{o['phonemes']}/  {o['label']}")
+    print(f"\n{len(issues)} word(s) to check. Fix one with [word](/phonemes/) in the notes, "
+          "or --fix-word SLIDE WORD N PHONEMES.")
+
+
+def set_paragraph_text(para, old, new):
+    """Change a notes paragraph from old to new text, touching only the runs the change
+    falls in, so the rest keeps its formatting."""
+    p = 0
+    while p < min(len(old), len(new)) and old[p] == new[p]:
+        p += 1
+    q = 0
+    while q < min(len(old), len(new)) - p and old[-1 - q] == new[-1 - q]:
+        q += 1
+    lo, hi = p, len(old) - q                     # the changed stretch of old
+    spans, pos = [], 0
+    for r in para.runs:
+        spans.append((r, pos, pos + len(r.text)))
+        pos += len(r.text)
+    hit = ([x for x in spans if x[1] < hi and x[2] > lo]                  # runs the change overlaps
+           or [x for x in spans if x[1] <= lo <= x[2]][:1] or spans[-1:])  # a pure insertion: its run
+    (r0, start, _), end = hit[0], hit[-1][2]
+    r0.text = new[start:end + len(new) - len(old)]
+    for r, _, _ in hit[1:]:
+        r.text = ""
+
+
+def fix_word(deck_path, slide_no, word, n, phonemes):
+    """Make the n-th occurrence of word in slide slide_no's speaker notes [word](/phonemes/),
+    saving the deck in place. The first time, the original is kept as
+    '<deck> (before deck-narrator).pptx' next to it."""
+    from pptx import Presentation
+    phonemes = phonemes.strip().strip("/")
+    if not phonemes or "/" in phonemes or ")" in phonemes:
+        raise Fail(f"--fix-word: {phonemes!r} isn't a usable phoneme string")
+    prs = Presentation(str(deck_path))
+    if not 1 <= slide_no <= len(prs.slides):
+        raise Fail(f"--fix-word: the deck has no slide {slide_no}")
+    slide = prs.slides[slide_no - 1]
+    tf = slide.notes_slide.notes_text_frame if slide.has_notes_slide else None
+    if tf is None:
+        raise Fail(f"--fix-word: slide {slide_no} has no speaker notes")
+    seen = 0
+    for para in tf.paragraphs:
+        text = "".join(r.text for r in para.runs)
+        here = 0
+        while nth_word_span(text, word, here + 1):
+            here += 1
+        if seen + here < n:
+            seen += here
+            continue
+        new = with_override(text, word, n - seen, phonemes)
+        set_paragraph_text(para, text, new)
+        break
+    else:
+        raise Fail(f"--fix-word: slide {slide_no}'s notes have only {seen} {word!r}, not {n}")
+    backup = deck_path.with_name(f"{deck_path.stem} (before deck-narrator){deck_path.suffix}")
+    if not backup.exists():
+        shutil.copy2(deck_path, backup)
+    tmp = deck_path.with_name(deck_path.name + ".tmp")
+    prs.save(str(tmp))
+    os.replace(tmp, deck_path)
+    log(f"Slide {slide_no}: {word} #{n} -> [{word}](/{phonemes}/)" + (f"; original kept as {backup.name}" if backup.exists() else ""))
+    return 0
+
+
+# ---------------------------------------------------------------- voice samples
+
+DEFAULT_SAMPLE_TEXT = "Hello! This is how your deck will sound."
+
+
+def sample_cache_dirs():
+    """Where finished --sample WAVs are kept: samples/ next to the program (pre-recorded,
+    shipped with the Windows builds), then a per-user cache. DECK_NARRATOR_SAMPLE_CACHE
+    replaces the per-user one."""
+    env = os.environ.get("DECK_NARRATOR_SAMPLE_CACHE")
+    if env:
+        user = Path(env)
+    elif os.name == "nt":
+        user = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "deck-narrator" / "samples"
+    else:
+        user = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "deck-narrator" / "samples"
+    return [app_dir() / "samples", user]
+
+
+def sample_key(voice, text, speed):
+    """Changes whenever the sound would: the voice, the text after the pronunciation file,
+    the speed, and the model. A voice --update-voices replaced adds its file's hash, so the
+    pre-recorded samples of the old one aren't used for it."""
+    import hashlib
+    updated = user_voice_dir() / f"{voice}.pt"
+    voice_id = sha256_file(updated) if updated.is_file() else voice
+    blob = json.dumps([REPO_ID, voice, voice_id, round(float(speed), 3), text], ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:32]
+
+
+SAMPLE_CACHE_MAX = 200     # newest kept in the per-user cache
+
+
 def speak_sample(args):
     """--sample: one phrase to a WAV, for trying voices, speeds and pronunciations."""
     import soundfile as sf
@@ -905,11 +1171,32 @@ def speak_sample(args):
     text = apply_pronunciations(clean_notes(args.sample), rules)
     if not text:
         raise Fail("--sample text is empty")
-    audio = TTS(resolve_device(args.device)).synthesize(args.voice, text, args.speed)
     out = out.resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
+    name = sample_key(args.voice, text, args.speed) + ".wav"
+    dirs = sample_cache_dirs()
+    for d in dirs:
+        if (d / name).is_file():
+            shutil.copyfile(d / name, out)
+            try:
+                os.utime(d / name)                  # recently used: keep it in the cache
+            except OSError:
+                pass
+            log(f"Sample: {args.voice}, from the saved copy")
+            print(out)
+            return 0
+    audio = TTS(resolve_device(args.device)).synthesize(args.voice, text, args.speed)
     sf.write(out, audio, SAMPLE_RATE, subtype="PCM_16")
     log(f"Sample: {len(audio) / SAMPLE_RATE:.2f}s of {args.voice}")
+    try:                                            # keep it for next time
+        cache = dirs[-1]
+        cache.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(out, cache / (name + ".part"))
+        os.replace(cache / (name + ".part"), cache / name)
+        for old in sorted(cache.glob("*.wav"), key=lambda f: f.stat().st_mtime)[:-SAMPLE_CACHE_MAX]:
+            old.unlink()
+    except OSError:
+        pass
     print(out)
     return 0
 
@@ -923,7 +1210,7 @@ def main(argv=None):
         return update_voices()
     check_voice_name(args.voice, "--voice")
     if args.phonemes:
-        print(TTS(resolve_device(args.device)).phonemize(args.voice, args.phonemes))
+        print(phonemize(args.voice, args.phonemes))
         return 0
     if args.sample:
         return speak_sample(args)
@@ -936,12 +1223,19 @@ def main(argv=None):
         raise Fail(f"expected a .pptx file, got {deck_path.name}")
     if args.pad < 0 or args.empty_duration <= 0 or args.speed <= 0 or args.build_hold <= 0:
         raise Fail("--pad must be >= 0; --empty-duration, --build-hold and --speed must be > 0")
-    out_path = resolve_output(deck_path, args.output)
+    if args.fix_word:
+        slide_no, word, n, phonemes = args.fix_word
+        if not (slide_no.isdigit() and n.isdigit() and int(n) > 0):
+            raise Fail("--fix-word SLIDE WORD N PHONEMES: SLIDE and N are numbers, e.g. --fix-word 3 read 1 ɹˈɛd")
+        return fix_word(deck_path, int(slide_no), word, int(n), phonemes)
+    report_only = args.show_builds or args.show_phonemes or args.check_pronunciation
+    out_path = None if report_only else resolve_output(deck_path, args.output)
     rules = load_pronunciations(args.pronunciations) if args.pronunciations else []
 
     # Fail fast on missing binaries before any slow work.
-    find_ffmpeg()
-    renderer = choose_renderer(args.renderer)
+    if not report_only:
+        find_ffmpeg()
+        renderer = choose_renderer(args.renderer)
 
     started = time.time()
     slides = read_deck(deck_path, with_builds=not args.no_builds)
@@ -991,14 +1285,21 @@ def main(argv=None):
             print()
         return 0
 
+    if args.check_pronunciation:
+        issues = pronunciation_issues(visible)
+        if args.json:
+            print(json.dumps({"issues": issues}, ensure_ascii=False))
+        else:
+            print_issues(issues)
+        return 0
+
     if args.show_phonemes:
-        tts = TTS(resolve_device(args.device))
         for s in visible:
             if s["parts"]:
                 print(f"--- slide {s['number']}")
                 for part in s["parts"]:
                     click = f"after click {part['step']}, " if part["step"] else ""
-                    print(f"[{click}{part['voice']}] {tts.phonemize(part['voice'], part['text'])}")
+                    print(f"[{click}{part['voice']}] {phonemize(part['voice'], part['text'])}")
                 print()
         return 0
 
