@@ -681,6 +681,7 @@ The test outputs (`test/*-deck.pptx`, `test/*-deck.mp4`) are gitignored.
 | `test/make_anim_deck.py` | Builds the animation/voices test deck (and a PowerPoint-format timing writer the unit tests reuse) |
 | `test/pronunciations.txt` | Example pronunciation file |
 | `examples/demo-deck.pptx` | A small deck to try: builds, `[click]`s and three voices (a copy of the test suite's `anim-deck.pptx`) |
+| `examples/how-to/` | A how-to deck about the app itself (1.2.1): screenshots with builds, notes in deck-narrator syntax, and embedded screen recordings; run it through deck-narrator for a narrated tour |
 
 ## Known limits
 
