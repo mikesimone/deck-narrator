@@ -42,7 +42,7 @@ itself from [its own deck](examples/how-to/).
 - [Testing](#testing)
 - [Files in this repo](#files-in-this-repo)
 - [Known limits](#known-limits)
-- [Code signing policy and privacy](#code-signing-policy-and-privacy)
+- [Privacy](#privacy)
 
 ## Install
 
@@ -67,10 +67,10 @@ and installs only what Deck Narrator uses, leaving Office alone:
 
 A silent install that does the same: `msiexec /i deck-narrator-<version>-x64.msi /qn INSTALLDEPS=1`.
 
-Code signing for the Windows releases is being set up with the
-[SignPath Foundation](https://signpath.org) (free code signing for open-source projects;
-see [Code signing policy](#code-signing-policy-and-privacy)). Until then, Windows may warn
-that the installer is from an unknown publisher, because it isn't code-signed. Choose **More info**, then **Run anyway**.
+The Windows releases aren't code-signed, so Windows may warn that the installer is from an
+unknown publisher. Choose **More info**, then **Run anyway**. They're built from this
+repository by GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), not on
+anyone's PC, and the Releases page lists each file's SHA-256.
 
 **Windows, standalone zip.** `deck-narrator-windows-x64.zip` on the same page is the same
 program without an installer: unzip it anywhere and run `deck-narrator-gui.exe` or
@@ -710,21 +710,9 @@ MIT for this repository's code (`LICENSE`). The Windows standalone zip bundles t
 packages, including GPL-3.0 ones, and is distributed under the GPL-3.0 as a whole; see
 `THIRD-PARTY-NOTICES.md`. The Kokoro-82M model is Apache-2.0.
 
-## Code signing policy and privacy
+## Privacy
 
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
-[SignPath Foundation](https://signpath.org).
-
-Windows releases (the MSI, and the programs in it and in the zip) are built from this
-repository by GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); nothing
-is built or signed on a personal machine.
-
-- **Committers and reviewers:** [Mike Simone](https://github.com/mikesimone), the sole maintainer.
-- **Approvers:** Mike Simone approves every release before it is signed.
-- Only code in this repository and the unmodified third-party components listed in
-  [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) are signed.
-
-**Privacy.** deck-narrator collects no data and sends nothing about you or your decks
+deck-narrator collects no data and sends nothing about you or your decks
 anywhere; decks, notes and videos never leave your computer. It connects to the internet
 only for these, and nothing else:
 
