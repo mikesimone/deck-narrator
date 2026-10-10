@@ -133,14 +133,17 @@ jobs:
           if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Deck Narrator.lnk")) { throw "no Start menu entry" }
           $path = [Environment]::GetEnvironmentVariable("Path", "Machine")
           if (($path -split ";") -notcontains "$dir\") { throw "install folder not on system PATH: $path" }
-          # INSTALLDEPS=1 ran the dependency script after the install; with LibreOffice
-          # already here (installed above) it finds nothing to do.
-          Select-String -Path install.log -Pattern "InstallDependencies" | Select-Object -First 3 | ForEach-Object { $_.Line }
+          # LibreOffice is already here (installed above): the installer must see it, and so
+          # neither show the finish page's LibreOffice checkbox nor run INSTALLDEPS=1.
+          if (-not (Select-String -Path install.log -Pattern "Property\(S\): HAVE_RENDERER = 1" -Quiet)) {
+            Select-String -Path install.log -Pattern "AppSearch|PPT64|PPT32|LO64|LO32" | Select-Object -First 20 | ForEach-Object { $_.Line }
+            throw "the installer didn't detect the installed LibreOffice"
+          }
+          if (Select-String -Path install.log -Pattern "Doing action: InstallDependencies" -Quiet) { throw "INSTALLDEPS=1 ran with LibreOffice installed" }
       - name: Dependency script (installed)
         env:
           DECK_NARRATOR_NO_PAUSE: "1"
         run: |
-          # (The copy INSTALLDEPS=1 started is still open, waiting for Enter: this one must cope.)
           $out = & "$env:ProgramFiles\Deck Narrator\install-dependencies.ps1" *>&1 | Out-String
           Write-Host $out
           if ($LASTEXITCODE) { throw "install-dependencies.ps1 failed: $LASTEXITCODE" }
