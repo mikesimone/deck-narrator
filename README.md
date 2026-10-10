@@ -73,7 +73,7 @@ repository by GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.
 anyone's PC, and the Releases page lists each file's SHA-256.
 
 **Windows, with winget or Chocolatey** (once each has accepted the package): the same
-installer, without the "unknown publisher" warning:
+installer, without the SmartScreen "Windows protected your PC" step:
 
 ```powershell
 winget install MikeSimone.DeckNarrator
