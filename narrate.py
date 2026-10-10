@@ -23,7 +23,7 @@ from pathlib import Path
 
 import builds as anim
 
-VERSION = "1.2.1"
+VERSION = "1.2.5"
 SAMPLE_RATE = 24000          # Kokoro's native output rate
 FPS = 30
 WIDTH, HEIGHT = 1920, 1080
@@ -107,7 +107,8 @@ def build_parser():
     p.add_argument("--no-builds", action="store_true", help="ignore animations: show each slide fully built, as before builds were supported")
     p.add_argument("--build-hold", type=float, default=BUILD_HOLD, help=f"seconds for a build step with no narration of its own (default: {BUILD_HOLD})")
     p.add_argument("--show-builds", action="store_true", help="print each selected slide's build steps and how the notes' [click]s line up, and exit (no video)")
-    p.add_argument("--pronunciations", metavar="FILE", help="word=replacement file applied to notes before TTS")
+    p.add_argument("--pronunciations", metavar="FILE", help="word=replacement file applied to notes before TTS "
+                   "(default: your personal dictionary, if you have one; see --add-word)")
     p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto", help="where Kokoro runs (default: auto = cuda if available)")
     p.add_argument("--renderer", choices=["auto", "powerpoint", "libreoffice"], default="auto",
                    help="what draws the slides (default: auto = PowerPoint if it's installed, else LibreOffice)")
@@ -120,6 +121,9 @@ def build_parser():
     p.add_argument("--fix-word", nargs=4, metavar=("SLIDE", "WORD", "N", "PHONEMES"),
                    help="write [WORD](/PHONEMES/) in place of the N-th WORD in slide SLIDE's notes, saving the deck "
                         "(the original is kept once as '<deck> (before deck-narrator).pptx'), and exit")
+    p.add_argument("--add-word", nargs=2, metavar=("WORD", "PHONEMES"),
+                   help="save WORD=[WORD](/PHONEMES/) in the dictionary (--pronunciations FILE, else your personal "
+                        "dictionary, created if needed), so WORD is said that way in every deck, and exit")
     p.add_argument("--sample", metavar="TEXT", help="speak TEXT with --voice, --speed and --pronunciations into a WAV and exit "
                    "(-o names the .wav; default: deck-narrator-sample.wav in the temp folder)")
     p.add_argument("--keep-temp", action="store_true", help="keep the intermediate files and print where they are")
@@ -197,6 +201,68 @@ def parse_script(raw, voice, default_voice, slide_no, rules=()):
             voice = default_voice if name in ("", "default") else check_voice_name(name, f"slide {slide_no}")
     add((raw or "")[pos:])
     return parts, step, voice
+
+
+DICT_TEMPLATE = """\
+# deck-narrator pronunciation dictionary
+# One rule per line: word=what to say instead. Whole words, case-sensitive.
+# Lines starting with # are comments. Inline fixes in the notes, like
+# [present](/pɹizˈɛnt/), beat this file. Full guide: docs/PRONUNCIATION.md
+#
+# Examples:
+# NGINX=engine x
+# SQL=sequel
+# Kubernetes=koo ber net eez
+"""
+
+
+def default_dictionary():
+    """The personal dictionary: used when --pronunciations isn't given and the file exists,
+    and where --add-word (and the GUI's Use this) saves words. DECK_NARRATOR_DICTIONARY
+    overrides where it lives."""
+    env = os.environ.get("DECK_NARRATOR_DICTIONARY")
+    if env:
+        return Path(env)
+    base = os.environ.get("APPDATA") if os.name == "nt" else os.environ.get("XDG_CONFIG_HOME")
+    return (Path(base) if base else Path.home() / ".config") / "deck-narrator" / "pronunciations.txt"
+
+
+def dictionary_for(args):
+    """The dictionary a run uses: --pronunciations, else the personal one if it exists."""
+    if args.pronunciations:
+        return Path(args.pronunciations)
+    d = default_dictionary()
+    return d if d.is_file() else None
+
+
+def add_word(path, word, phonemes):
+    """Save word=[word](/phonemes/) in the dictionary at path (created from DICT_TEMPLATE
+    if missing). A rule for the same word is replaced where it is; otherwise it goes at
+    the end. Comments and other rules are kept as they are."""
+    word = word.strip()
+    phonemes = phonemes.strip().strip("/")
+    if not word or not re.fullmatch(r"[\w'’.-]+", word) or "=" in word:
+        raise Fail(f"--add-word: {word!r} isn't a single word")
+    if not phonemes or "/" in phonemes or ")" in phonemes:
+        raise Fail(f"--add-word: {phonemes!r} isn't a usable phoneme string")
+    path = Path(path)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else DICT_TEMPLATE.splitlines()
+    if path.is_file():
+        load_pronunciations(path)                 # refuse to rewrite a file that's already broken
+    rule = f"{word}=[{word}](/{phonemes}/)"
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if s and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip() == word:
+            lines[i] = rule
+            break
+    else:
+        lines.append(rule)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+    log(f"Dictionary: {rule} saved in {path}")
+    return 0
 
 
 def load_pronunciations(path):
@@ -1167,7 +1233,8 @@ def speak_sample(args):
         raise Fail(f"--sample writes a WAV file; give -o a .wav path, not {out.name}")
     if args.speed <= 0:
         raise Fail("--speed must be > 0")
-    rules = load_pronunciations(args.pronunciations) if args.pronunciations else []
+    dictionary = dictionary_for(args)
+    rules = load_pronunciations(dictionary) if dictionary else []
     text = apply_pronunciations(clean_notes(args.sample), rules)
     if not text:
         raise Fail("--sample text is empty")
@@ -1212,6 +1279,8 @@ def main(argv=None):
     if args.phonemes:
         print(phonemize(args.voice, args.phonemes))
         return 0
+    if args.add_word:
+        return add_word(args.pronunciations or default_dictionary(), *args.add_word)
     if args.sample:
         return speak_sample(args)
     if not args.deck:
@@ -1230,7 +1299,10 @@ def main(argv=None):
         return fix_word(deck_path, int(slide_no), word, int(n), phonemes)
     report_only = args.show_builds or args.show_phonemes or args.check_pronunciation
     out_path = None if report_only else resolve_output(deck_path, args.output)
-    rules = load_pronunciations(args.pronunciations) if args.pronunciations else []
+    dictionary = dictionary_for(args)
+    rules = load_pronunciations(dictionary) if dictionary else []
+    if dictionary and not args.pronunciations:
+        log(f"Dictionary: {dictionary} ({len(rules)} words)")
 
     # Fail fast on missing binaries before any slow work.
     if not report_only:

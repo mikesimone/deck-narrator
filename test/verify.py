@@ -70,8 +70,8 @@ def cli(*args, env=None):
                           env=dict(os.environ, **(env or {})))
 
 
-# Check pronunciation, fix a word, and the sample cache, through the same program.
-print("== pronunciation check, fix and sample cache", flush=True)
+# Check pronunciation, fix a word, save one in the dictionary, and the sample cache, through the same program.
+print("== pronunciation check, fix, dictionary and sample cache", flush=True)
 r = cli(str(here / "test-deck.pptx"), "--check-pronunciation", "--json")
 try:
     issues = json.loads(next(l for l in r.stdout.splitlines() if l.startswith("{"))) ["issues"]
@@ -93,6 +93,19 @@ if issues:
     print(f"fix-word: {'ok' if ok else 'FAILED'}")
     if not ok:
         print(f.stdout, f.stderr, after.stderr)
+    failed |= not ok
+new = next((i for i in issues if i["kind"] in ("unknown", "spelled")), None)
+if new:
+    # A new word saved in the personal dictionary drops off the list without touching the deck.
+    dictionary = {"DECK_NARRATOR_DICTIONARY": str(Path(tempfile.mkdtemp()) / "pronunciations.txt")}
+    a = cli("--add-word", new["word"], new["options"][0]["phonemes"], env=dictionary)
+    after = cli(str(here / "test-deck.pptx"), "--check-pronunciation", "--json", env=dictionary)
+    left = json.loads(next(l for l in after.stdout.splitlines() if l.startswith("{")))["issues"] if after.returncode == 0 else None
+    ok = a.returncode == 0 and left is not None and new["word"] not in {i["word"] for i in left} \
+        and "Dictionary:" in after.stderr
+    print(f"add-word: {'ok' if ok else 'FAILED'}")
+    if not ok:
+        print(a.stdout, a.stderr, after.stderr)
     failed |= not ok
 cache = {"DECK_NARRATOR_SAMPLE_CACHE": tempfile.mkdtemp()}
 wav = Path(tempfile.mkdtemp()) / "s.wav"

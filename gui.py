@@ -32,17 +32,6 @@ IS_WINDOWS = os.name == "nt"
 HERE = Path(__file__).resolve().parent
 FROZEN = getattr(sys, "frozen", False)
 TITLE = "Deck Narrator"
-DICT_TEMPLATE = """\
-# deck-narrator pronunciation dictionary
-# One rule per line: word=what to say instead. Whole words, case-sensitive.
-# Lines starting with # are comments. Inline fixes in the notes, like
-# [present](/pɹizˈɛnt/), beat this file. Full guide: docs/PRONUNCIATION.md
-#
-# Examples:
-# NGINX=engine x
-# SQL=sequel
-# Kubernetes=koo ber net eez
-"""
 
 # Every CLI option, and the control that sets it. test/test_gui.py checks this
 # against narrate.build_parser(), so a new CLI option fails the tests until the
@@ -53,7 +42,8 @@ COVERED = {
     "pronunciations", "device", "show_phonemes", "phonemes", "sample", "keep_temp",
     "update_voices",   # the "Check for new voices" option and button
     "check_pronunciation", "json", "fix_word",   # Check pronunciation and its window
-    "renderer",        # Options tab: "Draw slides with"
+    "renderer",        # Settings: "Draw slides with"
+    "add_word",        # Check pronunciation: Use this on a word the dictionary lacks
     "help", "version",
 }
 
@@ -347,9 +337,17 @@ class Job:
             self.proc.terminate()
 
 
+UNOVERRIDE = re.compile(r"\[([^\[\]]*)\]\([^)]*\)")    # [word](/phonemes/) -> word, for showing a sentence
+
+
 class PronunciationReview:
     """The Check pronunciation window: the words that may be said wrong, each way of saying
-    one with a Play button, and Use this, which writes the choice into the deck's notes."""
+    one with a Play button, and Use this. For a word the dictionary doesn't know (or spells
+    out), Use this saves it in the pronunciation dictionary, so every deck says it that way;
+    for a word with more than one pronunciation, it writes the choice into this deck's notes,
+    since the right one depends on the sentence."""
+
+    TO_DICTIONARY = ("unknown", "spelled")
 
     KINDS = {"heteronym": "more than one way to say it", "unknown": "not in the dictionary",
              "spelled": "all capitals: spelled out"}
@@ -367,8 +365,9 @@ class PronunciationReview:
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(1, weight=1)
-        ttk.Label(outer, text=f"{len(issues)} word(s) that may be said wrong in {Path(deck).name}. Pick one, "
-                              "press Play to hear each way, then Use this to fix it in the deck's notes.",
+        ttk.Label(outer, text=f"{len(issues)} word(s) that may be said wrong in {Path(deck).name}. Pick one and "
+                              "press Play to hear each way. Use this saves a new word in your dictionary (every "
+                              "deck), or a word with two meanings in this deck's notes.",
                   wraplength=640, justify="left").grid(row=0, column=0, sticky="w", pady=(0, 6))
         frame = ttk.Frame(outer)
         frame.grid(row=1, column=0, sticky="nsew")
@@ -414,7 +413,10 @@ class PronunciationReview:
         if not sel:
             return
         issue = self.issues[int(sel[0])]
-        ttk.Label(self.detail, text=f"Slide {issue['slide']} ({issue['voice']}):  {issue['sentence']}",
+        where = "your dictionary" if issue["kind"] in self.TO_DICTIONARY else "this slide's notes"
+        sentence = UNOVERRIDE.sub(r"\1", issue["sentence"])
+        ttk.Label(self.detail, text=f"Slide {issue['slide']} ({issue['voice']}):  {sentence}   "
+                                    f"(Use this saves it in {where})",
                   wraplength=660, justify="left").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
         row = 1
         for o in issue["options"]:
@@ -472,6 +474,10 @@ class PronunciationReview:
                   "-o", str(self.wav)], done, "Making the sample...")
 
     def use(self, iid, issue, phonemes):
+        if issue["kind"] in self.TO_DICTIONARY:
+            self.add_to_dictionary(issue, phonemes)
+            return
+
         def done(out):
             self.tree.set(iid, "status", f"fixed: /{phonemes}/")
             self.status.configure(text=f"Saved in slide {issue['slide']}'s notes. The original deck is kept as "
@@ -482,6 +488,27 @@ class PronunciationReview:
                 self.tree.see(nxt)
         self.run([self.deck, "--fix-word", str(issue["slide"]), issue["word"], str(issue["n"]), phonemes],
                  done, "Saving the deck...")
+
+    def add_to_dictionary(self, issue, phonemes):
+        path = self.app.v["pronunciations"].get().strip() or str(narrate.default_dictionary())
+
+        def done(out):
+            word = issue["word"]
+            for iid in self.tree.get_children():
+                if self.issues[int(iid)]["word"] == word:
+                    self.tree.set(iid, "status", f"in dictionary: /{phonemes}/")
+            self.app.v["pronunciations"].set(path)       # the dictionary in use, shown in Settings
+            self.app.save_settings()
+            self.app.show_dictionary()
+            self.status.configure(text=f"Saved {word} in your dictionary ({Path(path).name}): every deck "
+                                       "says it this way now.")
+            rows = self.tree.get_children()
+            nxt = next((r for r in rows if not self.tree.set(r, "status").startswith(("fixed", "in dictionary"))), None)
+            if nxt:
+                self.tree.selection_set(nxt)
+                self.tree.see(nxt)
+        self.run(["--pronunciations", path, "--add-word", issue["word"], phonemes], done,
+                 "Saving it in your dictionary...")
 
     def custom(self, iid, issue, spelling, use):
         spelling = spelling.strip()
@@ -584,6 +611,7 @@ class App:
         ttk.Label(head, text=TITLE, style="Title.TLabel").pack(side="left")
         ttk.Label(head, text=f"  {narrate.VERSION}  ·  speaker notes to narrated video", style="Hint.TLabel").pack(
             side="left", pady=(6, 0))
+        ttk.Button(head, text="Settings", command=self.open_settings).pack(side="right")
         self.update_btn = ttk.Button(head, style="Accent.TButton", command=self.do_update)   # shown when there's one
 
         self.banner = ttk.Frame(outer)
@@ -634,61 +662,22 @@ class App:
         ttk.Entry(voice, textvariable=self.v["sample_text"]).grid(row=2, column=1, columnspan=2, sticky="ew", **pad)
         self.sample_btn = ttk.Button(voice, text="Play sample", command=lambda: self.run("sample"))
         self.sample_btn.grid(row=2, column=3, **pad)
-        voice_check = ttk.Frame(voice)
-        voice_check.grid(row=3, column=0, columnspan=4, sticky="w", pady=(6, 0))
-        ttk.Checkbutton(voice_check, text="Check for new voices at startup",
-                        variable=self.v["check_voices"]).pack(side="left", padx=4)
-        ttk.Button(voice_check, text="Check now", command=lambda: self.check_voices(force=True)).pack(side="left", padx=4)
 
         pron = tab("Pronunciation")
-        ttk.Label(pron, text="Dictionary").grid(row=0, column=0, sticky="w", **pad)
-        ttk.Entry(pron, textvariable=self.v["pronunciations"]).grid(row=0, column=1, sticky="ew", **pad)
-        btns = ttk.Frame(pron)
-        btns.grid(row=1, column=1, columnspan=2, sticky="w")
-        ttk.Button(btns, text="Import...", command=self.pick_dict).pack(side="left", padx=3)
-        ttk.Button(btns, text="New...", command=self.new_dict).pack(side="left", padx=3)
-        ttk.Button(btns, text="Edit", command=self.edit_dict).pack(side="left", padx=3)
-        ttk.Button(btns, text="Clear", command=lambda: self.v["pronunciations"].set("")).pack(side="left", padx=3)
-        ttk.Label(pron, text="One word=sounds-like per line, applied to the notes before speaking.",
-                  style="Hint.TLabel").grid(row=2, column=1, columnspan=2, sticky="w", padx=6)
-        ttk.Label(pron, text="Phonemes for").grid(row=3, column=0, sticky="w", **pad)
-        ttk.Entry(pron, textvariable=self.v["phonemes_text"]).grid(row=3, column=1, sticky="ew", **pad)
-        ttk.Button(pron, text="Show", command=lambda: self.run("phonemes_text")).grid(row=3, column=2, sticky="w", **pad)
-        ttk.Label(pron, text="Whole deck").grid(row=4, column=0, sticky="w", **pad)
+        ttk.Label(pron, text="Phonemes for").grid(row=0, column=0, sticky="w", **pad)
+        ttk.Entry(pron, textvariable=self.v["phonemes_text"]).grid(row=0, column=1, sticky="ew", **pad)
+        ttk.Button(pron, text="Show", command=lambda: self.run("phonemes_text")).grid(row=0, column=2, sticky="w", **pad)
+        ttk.Label(pron, text="Whole deck").grid(row=1, column=0, sticky="w", **pad)
         ttk.Button(pron, text="Show every slide's phonemes", command=lambda: self.run("phonemes")).grid(
-            row=4, column=1, sticky="w", **pad)
-
-        opts = tab("Options")
-        opts.columnconfigure(1, weight=0)
-        opts.columnconfigure(2, weight=1)
-        for r, (key, label, hi) in enumerate([("pad", "Pause around narration (s)", 5),
-                                              ("empty_duration", "Slide with no notes (s)", 30),
-                                              ("build_hold", "Silent build step (s)", 10)]):
-            ttk.Label(opts, text=label).grid(row=r, column=0, sticky="w", **pad)
-            ttk.Spinbox(opts, textvariable=self.v[key], from_=0, to=hi, increment=0.25, width=6).grid(
-                row=r, column=1, sticky="w", **pad)
-        checks = ttk.Frame(opts)
-        checks.grid(row=0, column=2, rowspan=3, sticky="nw", padx=(24, 0))
-        for i, (key, label) in enumerate([("skip_empty", "Skip slides with no notes"),
-                                          ("no_builds", "Ignore animations"),
-                                          ("keep_temp", "Keep temp files"),
-                                          ("allow_desktop", "Allow saving to a Desktop folder")]):
-            ttk.Checkbutton(checks, text=label, variable=self.v[key]).grid(row=i, column=0, sticky="w", pady=1)
-        ttk.Label(opts, text="Draw slides with").grid(row=3, column=0, sticky="w", **pad)
-        ttk.Combobox(opts, textvariable=self.v["renderer"], state="readonly", width=12,
-                     values=["auto", "powerpoint", "libreoffice"]).grid(row=3, column=1, sticky="w", **pad)
-        ttk.Label(opts, text="auto = PowerPoint if installed", style="Hint.TLabel").grid(
-            row=3, column=2, columnspan=2, sticky="w", **pad)
-        ttk.Label(opts, text="Run voice on").grid(row=4, column=0, sticky="w", **pad)
-        ttk.Combobox(opts, textvariable=self.v["device"], state="readonly", width=12,
-                     values=["auto", "cuda", "cpu"]).grid(row=4, column=1, sticky="w", **pad)
-        ttk.Label(opts, text="auto = NVIDIA GPU if there is one", style="Hint.TLabel").grid(
-            row=4, column=2, columnspan=2, sticky="w", **pad)
-        upd = ttk.Frame(opts)
-        upd.grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
-        ttk.Checkbutton(upd, text="Check for Deck Narrator updates at startup",
-                        variable=self.v["check_updates"]).pack(side="left", padx=4)
-        ttk.Button(upd, text="Check now", command=lambda: self.check_updates(force=True)).pack(side="left", padx=4)
+            row=1, column=1, sticky="w", **pad)
+        ttk.Label(pron, text="Dictionary").grid(row=2, column=0, sticky="w", **pad)
+        self.dict_label = ttk.Label(pron, style="Hint.TLabel")
+        self.dict_label.grid(row=2, column=1, sticky="w", **pad)
+        ttk.Button(pron, text="Edit", command=self.edit_dict).grid(row=2, column=2, sticky="w", **pad)
+        ttk.Label(pron, text="Check pronunciation (below) finds words that may be said wrong. Use this on a "
+                             "new word saves it here, for every deck. Choose another file in Settings.",
+                  style="Hint.TLabel", wraplength=560, justify="left").grid(row=3, column=1, columnspan=2, sticky="w", padx=6)
+        self.show_dictionary()
 
         logtab = ttk.Frame(self.tabs, padding=(4, 4))
         self.tabs.add(logtab, text="  Log  ")
@@ -712,6 +701,7 @@ class App:
             self.tabs.select(int(self.v["tab"].get()))
         except (tk.TclError, ValueError):
             pass
+        self.settings_win = None
 
         actions = ttk.Frame(outer)
         actions.grid(row=3, column=0, sticky="ew", pady=(8, 4))
@@ -731,6 +721,106 @@ class App:
         self.status = ttk.Label(outer, text="Ready.")
         self.status.grid(row=5, column=0, sticky="w", pady=(2, 0))
 
+    # ------------------------------------------------------------ settings window
+
+    def open_settings(self):
+        """The things that rarely change, in their own window. Its controls share the main
+        window's variables, so a change takes effect at once and is saved on Close."""
+        if self.settings_win and self.settings_win.winfo_exists():
+            self.settings_win.lift()
+            return
+        pad = {"padx": 5, "pady": 3}
+        c = self.colors
+        w = self.settings_win = tk.Toplevel(self.root)
+        w.title(f"{TITLE}: settings")
+        w.configure(bg=c["bg"])
+        w.transient(self.root)
+        outer = ttk.Frame(w, padding=(12, 10))
+        outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+
+        def section(row, text):
+            f = ttk.LabelFrame(outer, text=text, padding=(8, 4, 8, 6))
+            f.grid(row=row, column=0, sticky="ew", pady=(0, 8))
+            return f
+
+        video = section(0, "Video")
+        for r, (key, label, hi) in enumerate([("pad", "Pause around narration (s)", 5),
+                                              ("empty_duration", "Slide with no notes (s)", 30),
+                                              ("build_hold", "Silent build step (s)", 10)]):
+            ttk.Label(video, text=label).grid(row=r, column=0, sticky="w", **pad)
+            ttk.Spinbox(video, textvariable=self.v[key], from_=0, to=hi, increment=0.25, width=6).grid(
+                row=r, column=1, sticky="w", **pad)
+        checks = ttk.Frame(video)
+        checks.grid(row=0, column=2, rowspan=3, sticky="nw", padx=(24, 0))
+        for i, (key, label) in enumerate([("skip_empty", "Skip slides with no notes"),
+                                          ("no_builds", "Ignore animations"),
+                                          ("keep_temp", "Keep temp files"),
+                                          ("allow_desktop", "Allow saving to a Desktop folder")]):
+            ttk.Checkbutton(checks, text=label, variable=self.v[key]).grid(row=i, column=0, sticky="w", pady=1)
+
+        pron = section(1, "Pronunciation dictionary")
+        pron.columnconfigure(0, weight=1)
+        ttk.Entry(pron, textvariable=self.v["pronunciations"], width=60).grid(row=0, column=0, sticky="ew", **pad)
+        btns = ttk.Frame(pron)
+        btns.grid(row=1, column=0, sticky="w")
+        ttk.Button(btns, text="Import...", command=self.pick_dict).pack(side="left", padx=3)
+        ttk.Button(btns, text="New...", command=self.new_dict).pack(side="left", padx=3)
+        ttk.Button(btns, text="Edit", command=self.edit_dict).pack(side="left", padx=3)
+        ttk.Button(btns, text="Use my own", command=lambda: self.v["pronunciations"].set("")).pack(side="left", padx=3)
+        ttk.Label(pron, text=f"Blank = your own dictionary, {narrate.default_dictionary()}, which Use this in "
+                             "Check pronunciation fills in. One word=sounds-like per line.",
+                  style="Hint.TLabel", wraplength=560, justify="left").grid(row=2, column=0, sticky="w", padx=6)
+
+        engine = section(2, "Engine")
+        ttk.Label(engine, text="Draw slides with").grid(row=0, column=0, sticky="w", **pad)
+        ttk.Combobox(engine, textvariable=self.v["renderer"], state="readonly", width=12,
+                     values=["auto", "powerpoint", "libreoffice"]).grid(row=0, column=1, sticky="w", **pad)
+        ttk.Label(engine, text="auto = PowerPoint if installed", style="Hint.TLabel").grid(row=0, column=2, sticky="w", **pad)
+        ttk.Label(engine, text="Run voice on").grid(row=1, column=0, sticky="w", **pad)
+        ttk.Combobox(engine, textvariable=self.v["device"], state="readonly", width=12,
+                     values=["auto", "cuda", "cpu"]).grid(row=1, column=1, sticky="w", **pad)
+        ttk.Label(engine, text="auto = NVIDIA GPU if there is one", style="Hint.TLabel").grid(row=1, column=2, sticky="w", **pad)
+
+        upd = section(3, "Updates")
+        ttk.Checkbutton(upd, text="Check for new voices at startup", variable=self.v["check_voices"]).grid(
+            row=0, column=0, sticky="w", **pad)
+        ttk.Button(upd, text="Check now", command=lambda: self.check_voices(force=True)).grid(row=0, column=1, **pad)
+        ttk.Checkbutton(upd, text="Check for Deck Narrator updates at startup", variable=self.v["check_updates"]).grid(
+            row=1, column=0, sticky="w", **pad)
+        ttk.Button(upd, text="Check now", command=lambda: self.check_updates(force=True)).grid(row=1, column=1, **pad)
+
+        ttk.Button(outer, text="Close", style="Accent.TButton", command=self.close_settings).grid(row=4, column=0, sticky="e")
+        w.protocol("WM_DELETE_WINDOW", self.close_settings)
+        self.root.update_idletasks()
+        w.geometry(f"+{self.root.winfo_rootx() + 40}+{max(0, self.root.winfo_rooty() - 10)}")
+
+    def close_settings(self):
+        self.save_settings()
+        self.show_dictionary()
+        if self.settings_win:
+            self.settings_win.destroy()
+        self.settings_win = None
+
+    def dictionary_in_use(self):
+        """The file a run reads: the one chosen in Settings, else the personal one if it exists."""
+        chosen = self.v["pronunciations"].get().strip()
+        if chosen:
+            return Path(chosen)
+        d = narrate.default_dictionary()
+        return d if d.is_file() else None
+
+    def show_dictionary(self):
+        d = self.dictionary_in_use()
+        if not d:
+            text = "none yet (Use this in Check pronunciation starts one)"
+        else:
+            try:
+                text = f"{d.name}, {len(narrate.load_pronunciations(d))} word(s)"
+            except (narrate.Fail, OSError, UnicodeDecodeError) as e:
+                text = f"{d.name}: can't be read ({str(e)[:80]})"
+        self.dict_label.configure(text=text)
+
     # ------------------------------------------------------------ settings
 
     SAVED = ("voice", "speed", "device", "pronunciations", "pad", "empty_duration", "build_hold",
@@ -738,6 +828,11 @@ class App:
 
     def load_settings(self):
         self.last_dir = str(Path.home())
+        self.load_saved()
+        if not self.v["pronunciations"].get().strip() and narrate.default_dictionary().is_file():
+            self.v["pronunciations"].set(str(narrate.default_dictionary()))   # your dictionary, once it exists
+
+    def load_saved(self):
         try:
             data = json.loads(config_path().read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -751,14 +846,15 @@ class App:
         self.last_dir = data.get("last_dir", self.last_dir)
         if self.v["sample_text"].get() == "Hello! This is how I sound narrating your slides.":   # 1.1/1.2 default
             self.v["sample_text"].set(narrate.DEFAULT_SAMPLE_TEXT)
-        self.v["tab"].set(str(data.get("tab", 0)))
+        tab = int(data.get("tab", 0) or 0)
+        self.v["tab"].set(str(tab if tab <= 2 else 0))     # 1.2.1 had an Options tab at 3
         self.last_voice_check = float(data.get("last_voice_check", 0) or 0)
         self.last_update_check = float(data.get("last_update_check", 0) or 0)
 
     def save_settings(self):
         data = {k: self.v[k].get() for k in self.SAVED}
         try:
-            data["tab"] = min(self.tabs.index("current"), 3)   # reopen on the last form tab, not the log
+            data["tab"] = min(self.tabs.index("current"), 2)   # reopen on the last form tab, not the log
         except (tk.TclError, AttributeError):
             pass
         data["last_dir"] = self.last_dir
@@ -809,14 +905,22 @@ class App:
         if not p:
             return
         if not Path(p).exists():
-            Path(p).write_text(DICT_TEMPLATE, encoding="utf-8")
+            Path(p).write_text(narrate.DICT_TEMPLATE, encoding="utf-8")
         self.v["pronunciations"].set(p)
         self.edit_dict()
 
     def edit_dict(self):
-        p = self.v["pronunciations"].get()
-        if not p or not Path(p).is_file():
-            messagebox.showinfo(TITLE, "Import or create a dictionary first.")
+        p = self.v["pronunciations"].get().strip()
+        if not p:                                   # your own dictionary: start it from the template
+            d = narrate.default_dictionary()
+            if not d.is_file():
+                d.parent.mkdir(parents=True, exist_ok=True)
+                d.write_text(narrate.DICT_TEMPLATE, encoding="utf-8")
+            p = str(d)
+            self.v["pronunciations"].set(p)
+            self.show_dictionary()
+        if not Path(p).is_file():
+            messagebox.showinfo(TITLE, f"{p} doesn't exist. Choose another dictionary in Settings.")
             return
         if IS_WINDOWS:
             subprocess.Popen(["notepad.exe", p])
