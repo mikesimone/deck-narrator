@@ -37,6 +37,7 @@ or on the CPU if there isn't one.
 - [Testing](#testing)
 - [Files in this repo](#files-in-this-repo)
 - [Known limits](#known-limits)
+- [Code signing policy and privacy](#code-signing-policy-and-privacy)
 
 ## Install
 
@@ -650,3 +651,28 @@ The test outputs (`test/*-deck.pptx`, `test/*-deck.mp4`) are gitignored.
 MIT for this repository's code (`LICENSE`). The Windows standalone zip bundles third-party
 packages, including GPL-3.0 ones, and is distributed under the GPL-3.0 as a whole; see
 `THIRD-PARTY-NOTICES.md`. The Kokoro-82M model is Apache-2.0.
+
+## Code signing policy and privacy
+
+Windows releases (the MSI, and the programs in it and in the zip) are built from this
+repository by GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); nothing
+is built or signed on a personal machine.
+
+- **Committers and reviewers:** [Mike Simone](https://github.com/mikesimone), the sole maintainer.
+- **Approvers:** Mike Simone approves every release before it is signed.
+- Only code in this repository and the unmodified third-party components listed in
+  [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) are signed.
+
+**Privacy.** deck-narrator collects no data and sends nothing about you or your decks
+anywhere; decks, notes and videos never leave your computer. It connects to the internet
+only for these, and nothing else:
+
+- **HuggingFace** (huggingface.co), to download the Kokoro voice model and voices, and,
+  when **Check for new voices** is on (the GUI's default, at most once a day) or
+  `--update-voices` is run, to list the voices available. Turn the check off on the
+  **Voice** tab.
+- **The Document Foundation** (download.documentfoundation.org), only when you run
+  `install-dependencies.cmd` (or press **Install LibreOffice**, or tick the installer's
+  checkbox) on a PC without PowerPoint or LibreOffice, to download LibreOffice.
+
+Those services' own privacy policies apply to those downloads.
