@@ -181,8 +181,18 @@ Rules (all enforced by `narrate.py`, all covered by `test/test_text.py`):
 - If a word appears on two lines, the **last line wins**.
 - A line without `=` is an error (the tool names the file and line), never silently ignored.
 
-A starter file is in `test/pronunciations.txt`. A good habit is one file per deck,
-kept next to the deck:
+**Your personal dictionary.** Without `--pronunciations`, deck-narrator uses
+`%APPDATA%\deck-narrator\pronunciations.txt` (Linux: `~/.config/deck-narrator/pronunciations.txt`)
+if it exists. The GUI's **Check pronunciation** fills it in: **Use this** on a word the voice
+doesn't know (or spells out) saves it there, for every deck. From the command line:
+
+```bash
+deck-narrator --phonemes "zee scaler"            # zˈi skˈAləɹ
+deck-narrator --add-word Zscaler "zˈi skˈAləɹ"   # adds or replaces Zscaler=[Zscaler](/zˈi skˈAləɹ/)
+```
+
+A starter file is in `test/pronunciations.txt`. You can also keep one file per deck,
+next to the deck:
 
 ```bash
 deck-narrator deck.pptx --pronunciations deck.words.txt

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for --check-pronunciation, --fix-word and the --sample cache. The checks
+"""Unit tests for --check-pronunciation, --fix-word, --add-word and the --sample cache. The checks
 use Kokoro's phonemizer (misaki + spaCy, no voice model); the sample tests mock the TTS."""
 import contextlib
 import io
@@ -99,6 +99,61 @@ class Issues(unittest.TestCase):
     def test_overrides_and_plain_words_are_left_alone(self):
         issues = narrate.pronunciation_issues(self.slides("I [read](/ɹˈɛd/) the notes. The cat sat on the mat."))
         self.assertEqual(issues, [])
+
+
+class Dictionary(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "sub" / "pronunciations.txt"
+        self.env = mock.patch.dict(os.environ, {"DECK_NARRATOR_DICTIONARY": str(self.path)})
+        self.env.start()
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def test_add_word_creates_then_replaces_in_place(self):
+        with quiet():
+            narrate.add_word(self.path, "Zscaler", "/zˈiskˌAlɚ/")
+            narrate.add_word(self.path, "NGINX", "ˈɛnʤɪn ˈɛks")
+            narrate.add_word(self.path, "Zscaler", "zˈiskAlɚ")
+        text = self.path.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("# deck-narrator pronunciation dictionary"))
+        rules = narrate.load_pronunciations(self.path)
+        self.assertEqual(rules, [("Zscaler", "[Zscaler](/zˈiskAlɚ/)"), ("NGINX", "[NGINX](/ˈɛnʤɪn ˈɛks/)")])
+        self.assertEqual(narrate.apply_pronunciations("Zscaler and NGINX.", rules),
+                         "[Zscaler](/zˈiskAlɚ/) and [NGINX](/ˈɛnʤɪn ˈɛks/).")
+
+    def test_add_word_refuses_bad_input_and_broken_files(self):
+        for word, ps in (("two words", "x"), ("a=b", "x"), ("ok", ""), ("ok", "a/b"), ("ok", "a)b")):
+            with self.assertRaises(narrate.Fail):
+                narrate.add_word(self.path, word, ps)
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text("not a rule\n", encoding="utf-8")
+        with self.assertRaises(narrate.Fail):
+            narrate.add_word(self.path, "ok", "ˈOkA")
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "not a rule\n")
+
+    def test_personal_dictionary_is_used_only_when_it_exists(self):
+        args = narrate.build_parser().parse_args(["deck.pptx"])
+        self.assertIsNone(narrate.dictionary_for(args))
+        with quiet():
+            narrate.main(["--add-word", "Zscaler", "zˈiskAlɚ"])
+        self.assertEqual(narrate.dictionary_for(args), self.path)
+        other = narrate.build_parser().parse_args(["deck.pptx", "--pronunciations", "other.txt"])
+        self.assertEqual(narrate.dictionary_for(other), Path("other.txt"))
+
+    def test_a_dictionary_word_is_no_longer_an_issue(self):
+        deck = Path(self.tmp.name) / "d.pptx"
+        make_deck(deck, [["Zscaler blocks it."]])
+        slides = narrate.read_deck(deck)
+        narrate.script_deck(slides, "af_heart", [])
+        self.assertIn("Zscaler", [i["word"] for i in narrate.pronunciation_issues(slides)])
+        with quiet():
+            narrate.add_word(self.path, "Zscaler", "zˈiskAlɚ")
+        slides = narrate.read_deck(deck)
+        narrate.script_deck(slides, "af_heart", narrate.load_pronunciations(self.path))
+        self.assertNotIn("Zscaler", [i["word"] for i in narrate.pronunciation_issues(slides)])
 
 
 class SampleCache(unittest.TestCase):

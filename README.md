@@ -155,13 +155,16 @@ Steps 1 and 2 take seconds and render nothing.
 - **Deck** tab: the deck, where to save the video (blank = next to the deck), and which
   slides (blank = all).
 - **Voice** tab: pick a voice and speed, type something and press **Play sample** to hear
-  it. **Check for new voices at startup** (on by default) looks once a day for voices that
-  are new or updated since the install, and downloads them; **Check now** does it at once.
-- **Pronunciation** tab: **Import...** a [pronunciation file](docs/PRONUNCIATION.md),
-  **New...** to start one from a template, **Edit** to open it in Notepad (or your editor).
-  **Phonemes for** shows how any word or phrase will be said.
-- **Options** tab: the pauses, skipping empty slides, ignoring animations, keeping temp
-  files, PowerPoint or LibreOffice for drawing slides, and CPU or GPU.
+  it.
+- **Pronunciation** tab: **Phonemes for** shows how any word or phrase will be said, and
+  **Show every slide's phonemes** does the whole deck. It also shows which
+  [dictionary](docs/PRONUNCIATION.md#the-pronunciation-file-every-occurrence) is in use and how
+  many words it has; **Edit** opens it in Notepad (or your editor).
+- **Settings** (top right) holds what rarely changes: the pauses, skipping empty slides,
+  ignoring animations, keeping temp files, saving to a Desktop folder, which dictionary
+  file to use (**Import...**, **New...**, **Edit**, or **Use my own**), PowerPoint or
+  LibreOffice for drawing slides, CPU or GPU, and the startup checks for new voices and for
+  Deck Narrator updates (each with **Check now**).
 - **Log** tab: the full output of the last run. It comes forward when something runs.
 - **Make video**, **Check builds** (the `--show-builds` report) and **Check pronunciation**
   (see below) sit under the tabs, with the progress bar; **Cancel** stops a
@@ -170,19 +173,29 @@ Steps 1 and 2 take seconds and render nothing.
 **Check pronunciation** lists only the words that may come out wrong: words with more than
 one pronunciation (read, record, present, lead...), words that aren't in the voice's
 dictionary (so it guesses), and all-capitals names it would spell out letter by letter
-(OPSWAT). Pick one to see its sentence and each way of saying it, each with **Play**. **Use
-this** writes the choice into that slide's speaker notes as `[word](/phonemes/)` and saves
-the deck; the first time, the original is kept next to it as
-`<deck> (before deck-narrator).pptx`. If none of the choices is right, type a spelling that
-sounds right (`op swat`) under **Sounds like**, then **Play** or **Use this**. Close the deck
-in PowerPoint first, or it can't be saved. (The full phoneme listing of every slide is on the
+(OPSWAT). Pick one to see its sentence and each way of saying it, each with **Play**. What
+**Use this** does depends on the word:
+
+- **A word the voice doesn't know, or spells out:** it's saved in your pronunciation
+  dictionary, so every deck says it that way from now on. Your dictionary is
+  `%APPDATA%\deck-narrator\pronunciations.txt` (Linux: `~/.config/deck-narrator/pronunciations.txt`).
+  The first word saved creates it, and from then on it's used automatically, by the window
+  and the command line alike. To use a different file, pick it in **Settings**.
+- **A word with more than one pronunciation** (read, present): the right one depends on
+  the sentence, so the choice is written into that slide's speaker notes as
+  `[word](/phonemes/)` and the deck is saved. The first time, the original is kept next to
+  it as `<deck> (before deck-narrator).pptx`. Close the deck in PowerPoint first, or it
+  can't be saved.
+
+If none of the choices is right, type a spelling that
+sounds right (`op swat`) under **Sounds like**, then **Play** or **Use this**. (The full phoneme listing of every slide is on the
 **Pronunciation** tab.)
 
 **Play sample** is instant for the default sentence in every English voice: the Windows
 builds come with those recorded. Any other sample is saved after it's made the first time
 (the newest 200 are kept), so playing it again is instant too.
 
-**Updates:** with **Check for Deck Narrator updates at startup** on (the **Options** tab;
+**Updates:** with **Check for Deck Narrator updates at startup** on (in **Settings**;
 on by default), it asks GitHub once a day for the latest release. When there's a newer one,
 an **Update to x.y.z** button appears at the top. In the installed copy it downloads the
 new installer, checks it against the SHA-256 checksum GitHub lists for it, closes, installs
@@ -389,7 +402,8 @@ does.
 | `--show-builds` | | Print each selected slide's build states, what changes at each click, and which text is spoken over which state, and exit. No video |
 | `--no-builds` | off | Ignore animations: every slide fully built, `[click]` ignored |
 | `--build-hold SECONDS` | `1.0` | How long a build state shows when nothing is said over it |
-| `--pronunciations FILE` | none | `word=replacement` list applied before speech, see [PRONUNCIATION.md](docs/PRONUNCIATION.md#the-pronunciation-file-every-occurrence) |
+| `--pronunciations FILE` | your dictionary | `word=replacement` list applied before speech, see [PRONUNCIATION.md](docs/PRONUNCIATION.md#the-pronunciation-file-every-occurrence). Without it, your personal dictionary is used if you have one (the log says so) |
+| `--add-word WORD PHONEMES` | | Save `WORD=[WORD](/PHONEMES/)` in the dictionary (`--pronunciations FILE`, else your personal dictionary, created the first time), so `WORD` is said that way in every deck, and exit. A rule for the same word is replaced in place. The GUI's **Use this** does this for new words |
 | `--show-phonemes` | | Print every selected slide's script as phonemes, one line per voice and click, after stage directions and the pronunciation file, and exit. No video. Combine with `--slides`, `--pronunciations` and `--voice` |
 | `--phonemes TEXT` | | Print the phonemes for `TEXT` and exit. Doesn't need a deck |
 | `--check-pronunciation` | | List the words in the selected slides' notes that may be said wrong (more than one pronunciation, not in the dictionary, or an all-capitals word spelled out), with each word's sentence and choices, and exit. No video. `--json` prints it as JSON (the GUI uses that) |
@@ -555,6 +569,7 @@ Environment variables, all optional:
 | `DECK_NARRATOR_RENDERER` | `powerpoint` or `libreoffice`, overriding `--renderer` |
 | `DECK_NARRATOR_VOICE_DIR` | Where `--update-voices` puts new and updated voices (default: the per-user folder above) |
 | `DECK_NARRATOR_SAMPLE_CACHE` | Where finished samples are saved (default: `%LOCALAPPDATA%\deck-narrator\samples`, or `~/.cache/deck-narrator/samples`) |
+| `DECK_NARRATOR_DICTIONARY` | Where your personal pronunciation dictionary is (default: `%APPDATA%\deck-narrator\pronunciations.txt`, or `~/.config/deck-narrator/pronunciations.txt`) |
 | `DECK_NARRATOR_THEME` | `light` or `dark` for the GUI, instead of following Windows |
 | `DECK_NARRATOR_ALLOW_DESKTOP=1` | Allow writing into a Desktop folder |
 | `DECK_NARRATOR_MODEL_DIR` | A folder holding `config.json`, `kokoro-v1_0.pth` and `voices/*.pt`, used instead of downloading. Without it, a `model/` folder next to the program is used if there is one (the Windows installer puts one there); otherwise the HuggingFace download and cache. `packaging/fetch_model.py DEST` makes such a folder |
@@ -709,11 +724,11 @@ only for these, and nothing else:
 
 - **HuggingFace** (huggingface.co), to download the Kokoro voice model and voices, and,
   when **Check for new voices** is on (the GUI's default, at most once a day) or
-  `--update-voices` is run, to list the voices available. Turn the check off on the
-  **Voice** tab.
+  `--update-voices` is run, to list the voices available. Turn the check off in
+  **Settings**.
 - **GitHub** (api.github.com and github.com), at most once a day while **Check for Deck
   Narrator updates** is on (the default), to see whether there's a newer release, and to
-  download it when you press **Update**. Turn the check off on the **Options** tab.
+  download it when you press **Update**. Turn the check off in **Settings**.
 - **The Document Foundation** (download.documentfoundation.org), only when you run
   `install-dependencies.cmd` (or press **Install LibreOffice**, or tick the installer's
   checkbox) on a PC without PowerPoint or LibreOffice, to download LibreOffice.
