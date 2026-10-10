@@ -62,8 +62,10 @@ and installs only what Deck Narrator uses, leaving Office alone:
 
 A silent install that does the same: `msiexec /i deck-narrator-<version>-x64.msi /qn INSTALLDEPS=1`.
 
-Windows may warn that the installer is from an unknown publisher, because it isn't
-code-signed. Choose **More info**, then **Run anyway**.
+Code signing for the Windows releases is being set up with the
+[SignPath Foundation](https://signpath.org) (free code signing for open-source projects;
+see [Code signing policy](#code-signing-policy-and-privacy)). Until then, Windows may warn
+that the installer is from an unknown publisher, because it isn't code-signed. Choose **More info**, then **Run anyway**.
 
 **Windows, standalone zip.** `deck-narrator-windows-x64.zip` on the same page is the same
 program without an installer: unzip it anywhere and run `deck-narrator-gui.exe` or
@@ -653,6 +655,9 @@ packages, including GPL-3.0 ones, and is distributed under the GPL-3.0 as a whol
 `THIRD-PARTY-NOTICES.md`. The Kokoro-82M model is Apache-2.0.
 
 ## Code signing policy and privacy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org).
 
 Windows releases (the MSI, and the programs in it and in the zip) are built from this
 repository by GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)); nothing
