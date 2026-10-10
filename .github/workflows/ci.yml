@@ -204,5 +204,7 @@ jobs:
         run: |
           $tag = "v$env:VERSION"
           if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne $tag) { throw "tag ${{ github.ref_name }} doesn't match narrate.py VERSION $env:VERSION" }
-          gh release create $tag deck-narrator-$env:VERSION-x64.msi deck-narrator-windows-x64.zip --target $env:GITHUB_SHA --title $tag --generate-notes
+          # Hand-written notes in docs/release-notes/<tag>.md when there are any.
+          $notes = if (Test-Path "docs\release-notes\$tag.md") { @("--notes-file", "docs\release-notes\$tag.md") } else { @("--generate-notes") }
+          gh release create $tag deck-narrator-$env:VERSION-x64.msi deck-narrator-windows-x64.zip --target $env:GITHUB_SHA --title $tag @notes
           if ($LASTEXITCODE) { throw "gh release create failed" }
