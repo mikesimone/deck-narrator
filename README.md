@@ -182,6 +182,13 @@ in PowerPoint first, or it can't be saved. (The full phoneme listing of every sl
 builds come with those recorded. Any other sample is saved after it's made the first time
 (the newest 200 are kept), so playing it again is instant too.
 
+**Updates:** with **Check for Deck Narrator updates at startup** on (the **Options** tab;
+on by default), it asks GitHub once a day for the latest release. When there's a newer one,
+an **Update to x.y.z** button appears at the top. In the installed copy it downloads the
+new installer, checks it against the SHA-256 checksum GitHub lists for it, closes, installs
+it over the old version (the installer always replaces the previous one) and opens again.
+The zip and source copies open the download page instead.
+
 The window fits a 1024x768 screen. It follows Windows' light or dark app setting
 (`DECK_NARRATOR_THEME=light` or `dark` overrides it).
 
@@ -704,6 +711,9 @@ only for these, and nothing else:
   when **Check for new voices** is on (the GUI's default, at most once a day) or
   `--update-voices` is run, to list the voices available. Turn the check off on the
   **Voice** tab.
+- **GitHub** (api.github.com and github.com), at most once a day while **Check for Deck
+  Narrator updates** is on (the default), to see whether there's a newer release, and to
+  download it when you press **Update**. Turn the check off on the **Options** tab.
 - **The Document Foundation** (download.documentfoundation.org), only when you run
   `install-dependencies.cmd` (or press **Install LibreOffice**, or tick the installer's
   checkbox) on a PC without PowerPoint or LibreOffice, to download LibreOffice.
