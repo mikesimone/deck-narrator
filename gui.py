@@ -52,6 +52,7 @@ COVERED = {
     "skip_empty", "slides", "no_builds", "build_hold", "show_builds",
     "pronunciations", "device", "show_phonemes", "phonemes", "sample", "keep_temp",
     "update_voices",   # the "Check for new voices" option and button
+    "check_pronunciation", "json", "fix_word",   # Check pronunciation and its window
     "renderer",        # Options tab: "Draw slides with"
     "help", "version",
 }
@@ -154,6 +155,11 @@ def apply_theme(root, dark):
            lightcolor=[("selected", c["accent"])], darkcolor=[("selected", c["bg"])], expand=[("selected", (0, 2, 0, 0))])
     st.configure("Horizontal.TProgressbar", background=c["pink"], troughcolor=c["field"], bordercolor=c["border"],
                  lightcolor=c["pink"], darkcolor=c["pink"])
+    st.configure("Treeview", background=c["field"], fieldbackground=c["field"], foreground=c["ink"],
+                 bordercolor=c["border"], rowheight=24)
+    st.map("Treeview", background=[("selected", c["accent_dim"])], foreground=[("selected", c["on_accent"])])
+    st.configure("Treeview.Heading", background=c["panel"], foreground=c["accent"], font=bold, relief="flat")
+    st.map("Treeview.Heading", background=[("active", c["panel"])])
     st.configure("Vertical.TScrollbar", background=c["panel"], troughcolor=c["field"], bordercolor=c["border"])
     for opt, val in (("background", c["field"]), ("foreground", c["ink"]),
                      ("selectBackground", c["accent_dim"]), ("selectForeground", c["on_accent"])):
@@ -191,7 +197,7 @@ def voice_from_label(label):
 def build_args(f, mode):
     """Form values (a dict) -> CLI arguments for one action. Pure, so it's testable.
 
-    mode: "video", "builds", "phonemes" (whole deck), "phonemes_text", "sample".
+    mode: "video", "builds", "check" (pronunciation), "phonemes" (whole deck), "phonemes_text", "sample".
     Raises ValueError with a user-facing message when something required is missing.
     """
     args = ["--voice", f["voice"], "--device", f["device"]]
@@ -218,6 +224,8 @@ def build_args(f, mode):
         return args + ["--show-builds"]
     if mode == "phonemes":
         return args + ["--show-phonemes"]
+    if mode == "check":
+        return args + ["--check-pronunciation", "--json"]
 
     if f.get("output"):
         args += ["-o", f["output"]]
@@ -309,6 +317,168 @@ class Job:
             self.proc.terminate()
 
 
+class PronunciationReview:
+    """The Check pronunciation window: the words that may be said wrong, each way of saying
+    one with a Play button, and Use this, which writes the choice into the deck's notes."""
+
+    KINDS = {"heteronym": "more than one way to say it", "unknown": "not in the dictionary",
+             "spelled": "all capitals: spelled out"}
+
+    def __init__(self, app, issues, deck):
+        self.app, self.issues, self.deck = app, issues, deck
+        self.job = None
+        self.wav = Path(tempfile.gettempdir()) / "deck-narrator-review.wav"
+        c = app.colors
+        w = self.win = tk.Toplevel(app.root)
+        w.title(f"{TITLE}: check pronunciation")
+        w.configure(bg=c["bg"])
+        w.transient(app.root)
+        outer = ttk.Frame(w, padding=(12, 10))
+        outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(1, weight=1)
+        ttk.Label(outer, text=f"{len(issues)} word(s) that may be said wrong in {Path(deck).name}. Pick one, "
+                              "press Play to hear each way, then Use this to fix it in the deck's notes.",
+                  wraplength=640, justify="left").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        frame = ttk.Frame(outer)
+        frame.grid(row=1, column=0, sticky="nsew")
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+        self.tree = ttk.Treeview(frame, columns=("slide", "word", "why", "status"), show="headings", height=8,
+                                 selectmode="browse")
+        for col, text, width in (("slide", "Slide", 50), ("word", "Word", 120), ("why", "Why", 230),
+                                 ("status", "Status", 200)):
+            self.tree.heading(col, text=text, anchor="w")
+            self.tree.column(col, width=width, anchor="w", stretch=col == "status")
+        for i, issue in enumerate(issues):
+            self.tree.insert("", "end", iid=str(i), values=(issue["slide"], issue["word"],
+                                                            self.KINDS.get(issue["kind"], issue["kind"]),
+                                                            f"now /{issue['current']}/"))
+        sb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        sb.grid(row=0, column=1, sticky="ns")
+        self.tree.bind("<<TreeviewSelect>>", lambda e: self.show())
+
+        self.detail = ttk.LabelFrame(outer, text="Choose how it's said", padding=(8, 4, 8, 6))
+        self.detail.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        self.detail.columnconfigure(1, weight=1)
+        self.status = ttk.Label(outer, text="", style="Hint.TLabel")
+        self.status.grid(row=3, column=0, sticky="w", pady=(6, 0))
+        btns = ttk.Frame(outer)
+        btns.grid(row=4, column=0, sticky="e", pady=(6, 0))
+        ttk.Button(btns, text="Close", command=self.close).pack(side="right")
+        w.protocol("WM_DELETE_WINDOW", self.close)
+        app.root.update_idletasks()
+        w.geometry(f"720x520+{app.root.winfo_rootx() + 30}+{max(0, app.root.winfo_rooty() - 20)}")
+        if issues:
+            self.tree.selection_set("0")
+        else:
+            ttk.Label(self.detail, text="Nothing to check: every word has one clear pronunciation.").grid(
+                row=0, column=0, sticky="w")
+
+    def show(self):
+        for child in self.detail.winfo_children():
+            child.destroy()
+        sel = self.tree.selection()
+        if not sel:
+            return
+        issue = self.issues[int(sel[0])]
+        ttk.Label(self.detail, text=f"Slide {issue['slide']} ({issue['voice']}):  {issue['sentence']}",
+                  wraplength=660, justify="left").grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
+        row = 1
+        for o in issue["options"]:
+            ttk.Label(self.detail, text=f"/{o['phonemes']}/").grid(row=row, column=0, sticky="w", padx=(0, 8))
+            ttk.Label(self.detail, text=o["label"], style="Hint.TLabel").grid(row=row, column=1, sticky="w")
+            ttk.Button(self.detail, text="Play", command=lambda o=o: self.play(issue, o["say"])).grid(
+                row=row, column=2, padx=3, pady=1)
+            ttk.Button(self.detail, text="Use this", command=lambda o=o: self.use(sel[0], issue, o["phonemes"])).grid(
+                row=row, column=3, padx=3, pady=1)
+            row += 1
+        ttk.Label(self.detail, text="Sounds like").grid(row=row, column=0, sticky="w", padx=(0, 8), pady=(4, 0))
+        spell = tk.StringVar()
+        ttk.Entry(self.detail, textvariable=spell).grid(row=row, column=1, sticky="ew", pady=(4, 0))
+        ttk.Button(self.detail, text="Play", command=lambda: self.custom(sel[0], issue, spell.get(), False)).grid(
+            row=row, column=2, padx=3, pady=(4, 0))
+        ttk.Button(self.detail, text="Use this", command=lambda: self.custom(sel[0], issue, spell.get(), True)).grid(
+            row=row, column=3, padx=3, pady=(4, 0))
+        ttk.Label(self.detail, text="Or type a spelling that sounds right, e.g. \"op swat\" or \"zee scaler\".",
+                  style="Hint.TLabel").grid(row=row + 1, column=1, columnspan=3, sticky="w")
+
+    def run(self, args, done, what):
+        if self.job:
+            self.status.configure(text="Still busy with the last one...")
+            return
+        out = []
+        self.status.configure(text=what)
+        env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+
+        def finished(code, cancelled):
+            self.job = None
+            if code == 0:
+                done(out)
+            else:
+                err = next((l for l in reversed(out) if "error:" in l), "it failed")
+                self.status.configure(text=err.split("error:", 1)[-1].strip()[:200])
+        try:
+            self.job = Job(cli_command() + args, env, out.append, finished)
+        except OSError as e:
+            self.status.configure(text=f"Couldn't start the command line program: {e}")
+            return
+        self.poll()
+
+    def poll(self):
+        if self.job and self.job.pump():
+            self.win.after(100, self.poll)
+
+    def play(self, issue, text):
+        def done(out):
+            try:
+                play_wav(self.wav)
+                self.status.configure(text="Playing.")
+            except Exception as e:
+                self.status.configure(text=f"Couldn't play it: {e}")
+        self.run(["--voice", issue["voice"], "--speed", self.app.v["speed"].get(), "--sample", text,
+                  "-o", str(self.wav)], done, "Making the sample...")
+
+    def use(self, iid, issue, phonemes):
+        def done(out):
+            self.tree.set(iid, "status", f"fixed: /{phonemes}/")
+            self.status.configure(text=f"Saved in slide {issue['slide']}'s notes. The original deck is kept as "
+                                       f"\"{Path(self.deck).stem} (before deck-narrator).pptx\".")
+            nxt = self.tree.next(iid)
+            if nxt:
+                self.tree.selection_set(nxt)
+                self.tree.see(nxt)
+        self.run([self.deck, "--fix-word", str(issue["slide"]), issue["word"], str(issue["n"]), phonemes],
+                 done, "Saving the deck...")
+
+    def custom(self, iid, issue, spelling, use):
+        spelling = spelling.strip()
+        if not spelling:
+            self.status.configure(text="Type how the word should sound first.")
+            return
+
+        def done(out):
+            ps = next((l for l in reversed(out) if l.strip() and not l.startswith(("Loading", "deck-narrator"))), "")
+            ps = ps.strip()
+            if not ps:
+                self.status.configure(text="Couldn't work out phonemes for that spelling.")
+                return
+            if use:
+                self.use(iid, issue, ps)
+            else:
+                say = narrate.with_override(issue["sentence"], issue["word"], issue["n_in_sentence"], ps)
+                self.play(issue, say or spelling)
+        self.run(["--voice", issue["voice"], "--phonemes", spelling], done, "Working out the phonemes...")
+
+    def close(self):
+        if self.job:
+            self.job.cancel()
+        self.win.destroy()
+        self.app.review = None
+
+
 class App:
     def __init__(self, root, selftest=None):
         self.root = root
@@ -335,7 +505,7 @@ class App:
             "build_hold": tk.StringVar(value=str(narrate.BUILD_HOLD)),
             "skip_empty": tk.BooleanVar(), "no_builds": tk.BooleanVar(), "keep_temp": tk.BooleanVar(),
             "allow_desktop": tk.BooleanVar(),
-            "sample_text": tk.StringVar(value="Hello! This is how I sound narrating your slides."),
+            "sample_text": tk.StringVar(value=narrate.DEFAULT_SAMPLE_TEXT),
             "phonemes_text": tk.StringVar(),
             "check_voices": tk.BooleanVar(value=True),
             "renderer": tk.StringVar(value="auto"),
@@ -449,6 +619,9 @@ class App:
         ttk.Label(pron, text="Phonemes for").grid(row=3, column=0, sticky="w", **pad)
         ttk.Entry(pron, textvariable=self.v["phonemes_text"]).grid(row=3, column=1, sticky="ew", **pad)
         ttk.Button(pron, text="Show", command=lambda: self.run("phonemes_text")).grid(row=3, column=2, sticky="w", **pad)
+        ttk.Label(pron, text="Whole deck").grid(row=4, column=0, sticky="w", **pad)
+        ttk.Button(pron, text="Show every slide's phonemes", command=lambda: self.run("phonemes")).grid(
+            row=4, column=1, sticky="w", **pad)
 
         opts = tab("Options")
         opts.columnconfigure(1, weight=0)
@@ -505,7 +678,7 @@ class App:
         self.make_btn = ttk.Button(actions, text="Make video", style="Accent.TButton", command=lambda: self.run("video"))
         self.make_btn.pack(side="left", padx=3)
         ttk.Button(actions, text="Check builds", command=lambda: self.run("builds")).pack(side="left", padx=3)
-        ttk.Button(actions, text="Show phonemes", command=lambda: self.run("phonemes")).pack(side="left", padx=3)
+        ttk.Button(actions, text="Check pronunciation", command=lambda: self.run("check")).pack(side="left", padx=3)
         self.cancel_btn = ttk.Button(actions, text="Cancel", command=self.cancel, state="disabled")
         self.cancel_btn.pack(side="left", padx=3)
         self.folder_btn = ttk.Button(actions, text="Open folder", command=self.open_folder, state="disabled")
@@ -536,6 +709,8 @@ class App:
                 except tk.TclError:
                     pass
         self.last_dir = data.get("last_dir", self.last_dir)
+        if self.v["sample_text"].get() == "Hello! This is how I sound narrating your slides.":   # 1.1/1.2 default
+            self.v["sample_text"].set(narrate.DEFAULT_SAMPLE_TEXT)
         self.v["tab"].set(str(data.get("tab", 0)))
         self.last_voice_check = float(data.get("last_voice_check", 0) or 0)
 
@@ -723,7 +898,7 @@ class App:
         self.progress.configure(mode="indeterminate")
         self.progress.start(12)
         self.status.configure(text={"video": "Making the video...", "sample": "Synthesizing the sample...",
-                                    "builds": "Reading the deck's animations..."}.get(mode, "Working..."))
+                                    "builds": "Reading the deck's animations...", "check": "Checking pronunciation..."}.get(mode, "Working..."))
         self.cancel_btn.configure(state="normal")
         self.make_btn.configure(state="disabled")
         self.sample_btn.configure(state="disabled")
@@ -741,6 +916,8 @@ class App:
 
     def on_line(self, line):
         self.out_lines.append(line)
+        if line.startswith('{"issues"'):        # --check-pronunciation --json: shown in its own window
+            return
         self.append(line)
         m = re.match(r"\[(\d+)/(\d+)\] slide", line) or re.match(r"Rendering build pass (\d+)/(\d+)", line)
         if m:
@@ -771,6 +948,15 @@ class App:
             state = "normal" if self.last_video else "disabled"
             self.open_btn.configure(state=state)
             self.folder_btn.configure(state=state)
+        elif self.mode == "check":
+            data = next((l for l in self.out_lines if l.startswith('{"issues"')), None)
+            issues = json.loads(data)["issues"] if data else []
+            self.status.configure(text=f"{len(issues)} word(s) to check." if issues else
+                                  "No likely pronunciation problems found.")
+            self.append(f"{len(issues)} word(s) to check, in the Check pronunciation window.")
+            if getattr(self, "review", None):
+                self.review.close()
+            self.review = PronunciationReview(self, issues, self.v["deck"].get())
         elif self.mode == "sample":
             self.status.configure(text="Playing the sample.")
             try:
@@ -819,7 +1005,7 @@ class App:
 
 def main(argv=None):
     """GUI entry point. Test-only: --selftest MODE DECK RESULT_FILE [LINGER_SECONDS]
-    opens the window, presses the button for MODE (video, builds, phonemes, sample)
+    opens the window, presses the button for MODE (video, builds, check, phonemes, sample)
     on DECK, writes the exit code and log to RESULT_FILE, keeps the window up for
     LINGER_SECONDS (for a screenshot) and exits with 0 on success."""
     argv = sys.argv[1:] if argv is None else argv

@@ -163,9 +163,24 @@ Steps 1 and 2 take seconds and render nothing.
 - **Options** tab: the pauses, skipping empty slides, ignoring animations, keeping temp
   files, PowerPoint or LibreOffice for drawing slides, and CPU or GPU.
 - **Log** tab: the full output of the last run. It comes forward when something runs.
-- **Make video**, **Check builds** (the `--show-builds` report) and **Show phonemes** (the
-  `--show-phonemes` report) sit under the tabs, with the progress bar; **Cancel** stops a
+- **Make video**, **Check builds** (the `--show-builds` report) and **Check pronunciation**
+  (see below) sit under the tabs, with the progress bar; **Cancel** stops a
   run. When a video is done, **Play video** and **Open folder** open it.
+
+**Check pronunciation** lists only the words that may come out wrong: words with more than
+one pronunciation (read, record, present, lead...), words that aren't in the voice's
+dictionary (so it guesses), and all-capitals names it would spell out letter by letter
+(OPSWAT). Pick one to see its sentence and each way of saying it, each with **Play**. **Use
+this** writes the choice into that slide's speaker notes as `[word](/phonemes/)` and saves
+the deck; the first time, the original is kept next to it as
+`<deck> (before deck-narrator).pptx`. If none of the choices is right, type a spelling that
+sounds right (`op swat`) under **Sounds like**, then **Play** or **Use this**. Close the deck
+in PowerPoint first, or it can't be saved. (The full phoneme listing of every slide is on the
+**Pronunciation** tab.)
+
+**Play sample** is instant for the default sentence in every English voice: the Windows
+builds come with those recorded. Any other sample is saved after it's made the first time
+(the newest 200 are kept), so playing it again is instant too.
 
 The window fits a 1024x768 screen. It follows Windows' light or dark app setting
 (`DECK_NARRATOR_THEME=light` or `dark` overrides it).
@@ -317,7 +332,10 @@ The voice reads notes through a phonemizer that tags each word's part of speech,
 heteronyms come out right on their own. ("When you present a presentation sometime in the
 present" is read correctly with no help.) When it gets one wrong:
 
-1. **Find it:** `deck-narrator deck.pptx --show-phonemes` prints what each slide will say.
+1. **Find it:** `deck-narrator deck.pptx --check-pronunciation` lists just the words that
+   may be wrong, with the ways each can be said (the GUI's **Check pronunciation** shows
+   the same, with **Play** and **Use this** buttons). `--show-phonemes` prints everything
+   each slide will say.
 2. **Look up the reading you want:** use a sentence where the word can only be read
    one way, and copy that word's phonemes:
    ```bash
@@ -367,7 +385,9 @@ does.
 | `--pronunciations FILE` | none | `word=replacement` list applied before speech, see [PRONUNCIATION.md](docs/PRONUNCIATION.md#the-pronunciation-file-every-occurrence) |
 | `--show-phonemes` | | Print every selected slide's script as phonemes, one line per voice and click, after stage directions and the pronunciation file, and exit. No video. Combine with `--slides`, `--pronunciations` and `--voice` |
 | `--phonemes TEXT` | | Print the phonemes for `TEXT` and exit. Doesn't need a deck |
-| `--sample TEXT` | | Speak `TEXT` into a WAV with `--voice`, `--speed` and `--pronunciations`, print its path and exit. `-o` names the `.wav` (default: `deck-narrator-sample.wav` in the temp folder). Doesn't need a deck. The GUI's **Play sample** uses this |
+| `--check-pronunciation` | | List the words in the selected slides' notes that may be said wrong (more than one pronunciation, not in the dictionary, or an all-capitals word spelled out), with each word's sentence and choices, and exit. No video. `--json` prints it as JSON (the GUI uses that) |
+| `--fix-word SLIDE WORD N PHONEMES` | | Write `[WORD](/PHONEMES/)` in place of the `N`th `WORD` in slide `SLIDE`'s notes and save the deck. The first time, the original is kept as `<deck> (before deck-narrator).pptx`. `N` counts every whole-word `WORD` in that slide's notes, fixed or not, case ignored |
+| `--sample TEXT` | | Speak `TEXT` into a WAV with `--voice`, `--speed` and `--pronunciations`, print its path and exit. `-o` names the `.wav` (default: `deck-narrator-sample.wav` in the temp folder). Doesn't need a deck. The GUI's **Play sample** uses this. Samples are saved (see [The GUI](#the-gui)), so the same one again is instant |
 | `--device auto\|cuda\|cpu` | `auto` | Where Kokoro runs. `auto` uses CUDA when torch can see a GPU |
 | `--renderer auto\|powerpoint\|libreoffice` | `auto` | What draws the slides. `auto` uses Microsoft PowerPoint when it's installed (Windows), else LibreOffice |
 | `--update-voices` | | Download voices that are new or updated on HuggingFace since the install, into a per-user folder, print one `voices: ...` line, and exit. Only for installs with bundled voices; others download voices on use anyway |
@@ -527,6 +547,7 @@ Environment variables, all optional:
 | `DECK_NARRATOR_FFMPEG` | Full path to `ffmpeg`. Otherwise the bundled `ffmpeg\ffmpeg.exe` (Windows builds), else PATH |
 | `DECK_NARRATOR_RENDERER` | `powerpoint` or `libreoffice`, overriding `--renderer` |
 | `DECK_NARRATOR_VOICE_DIR` | Where `--update-voices` puts new and updated voices (default: the per-user folder above) |
+| `DECK_NARRATOR_SAMPLE_CACHE` | Where finished samples are saved (default: `%LOCALAPPDATA%\deck-narrator\samples`, or `~/.cache/deck-narrator/samples`) |
 | `DECK_NARRATOR_THEME` | `light` or `dark` for the GUI, instead of following Windows |
 | `DECK_NARRATOR_ALLOW_DESKTOP=1` | Allow writing into a Desktop folder |
 | `DECK_NARRATOR_MODEL_DIR` | A folder holding `config.json`, `kokoro-v1_0.pth` and `voices/*.pt`, used instead of downloading. Without it, a `model/` folder next to the program is used if there is one (the Windows installer puts one there); otherwise the HuggingFace download and cache. `packaging/fetch_model.py DEST` makes such a folder |
@@ -566,7 +587,7 @@ copy with HuggingFace switched off (so everything must come from the installer),
 screenshots of the GUI, and uninstalls it, checking that the files, Start menu entry and
 PATH entry are gone. On Linux it also opens the GUI on a virtual display.
 
-1. **Unit tests** (66, no GPU, under a second). On their own:
+1. **Unit tests** (75, no GPU, a few seconds). On their own:
    `.venv/bin/python -m unittest discover -s test -v`
    - `test/test_text.py`: stage-direction stripping, keeping overrides, the
      detached-override check, pronunciation-file rules (whole word, case, longest first,
@@ -584,6 +605,9 @@ PATH entry are gone. On Linux it also opens the GUI on a virtual display.
      `--update-voices` (new and changed voices, offline, nothing bundled), with HuggingFace mocked.
    - `test/test_tools.py`: choosing PowerPoint or LibreOffice, the bundled ffmpeg, and the
      PowerPoint build passes exporting the right slides.
+   - `test/test_pronunciation.py`: what `--check-pronunciation` finds (and leaves alone),
+     `--fix-word` (the right occurrence, formatting kept, the backup, bad requests), and the
+     sample cache (cached, pre-recorded first, and the key changing with what you'd hear).
 2. **End to end, two decks**, each rendered and checked by `test/check_video.py`:
    - `test/test-deck.pptx` (`make_test_deck.py`): multi-sentence notes with stage
      directions, an inline override, a hidden slide, a slide with no notes, and a long
@@ -598,7 +622,11 @@ PATH entry are gone. On Linux it also opens the GUI on a virtual display.
    counts; each slide's duration against an independent formula, within one frame per
    segment; container, video and audio durations against the total; a frame grabbed
    mid-segment matches **that** build state better than any other state of the slide; and
-   the voice of every part. Ends `ALL: PASS` or `ALL: FAIL`.
+   the voice of every part.
+3. **Pronunciation and samples**, through the same program: `--check-pronunciation --json`
+   on the test deck, `--fix-word` on a copy (the fixed word must drop off the list, and the
+   backup must exist), and the same `--sample` twice (the second must come from the saved
+   copy). Ends `ALL: PASS` or `ALL: FAIL`.
 
 The frame check was itself tested: swapping two build states in a kept run's frame list
 makes it fail. The animated deck was also round-tripped through LibreOffice's own PPTX
@@ -619,12 +647,12 @@ The test outputs (`test/*-deck.pptx`, `test/*-deck.mp4`) are gitignored.
 | `deck-narrator-gui`, `deck-narrator-gui.cmd` | GUI wrappers for Linux and Windows |
 | `setup.sh`, `setup.ps1` | Install everything, on Linux and Windows |
 | `requirements.txt` | Python deps (torch is installed separately, from PyTorch's index) |
-| `packaging/` | The PyInstaller spec (both programs), the icon and logo (`make_art.py` draws them and the installer images, in the brand colors), `fetch_model.py` (bundles the voices), `install-dependencies.ps1`/`.cmd` (the minimal LibreOffice install), what goes in the zip besides the programs, and `installer/` (the WiX source, license page and banner images for the MSI) |
+| `packaging/` | The PyInstaller spec (both programs), the icon and logo (`make_art.py` draws them and the installer images, in the brand colors), `fetch_model.py` (bundles the voices), `prerender_samples.py` (records the default sample in every English voice), `install-dependencies.ps1`/`.cmd` (the minimal LibreOffice install), what goes in the zip besides the programs, and `installer/` (the WiX source, license page and banner images for the MSI) |
 | `.github/workflows/ci.yml` | Tests on Linux and Windows, builds the zip and the MSI, tests the installed MSI, attaches both to releases |
 | `LICENSE`, `THIRD-PARTY-NOTICES.md` | MIT for this code; what the zip and installer bundle and under which licenses |
 | `docs/PRONUNCIATION.md` | The full pronunciation guide |
 | `test/verify.py` (`verify.sh`) | Unit tests plus both end-to-end checks |
-| `test/test_text.py`, `test/test_builds.py`, `test/test_gui.py`, `test/test_model_dir.py`, `test/test_tools.py` | Unit tests |
+| `test/test_text.py`, `test/test_builds.py`, `test/test_gui.py`, `test/test_model_dir.py`, `test/test_tools.py`, `test/test_pronunciation.py` | Unit tests |
 | `test/gui_selftest.ps1` | Drives the GUI on Windows and screenshots it (CI runs it against the installed MSI) |
 | `test/check_video.py` | The end-to-end checks on a rendered video |
 | `test/make_test_deck.py` | Builds the narration test deck |

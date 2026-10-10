@@ -4,7 +4,7 @@
 #   test\gui_selftest.ps1 -Gui "C:\Program Files\Deck Narrator\deck-narrator-gui.exe" -Mode video -Deck test\test-deck.pptx -Shot gui-video.png
 param(
     [Parameter(Mandatory)] [string]$Gui,
-    [Parameter(Mandatory)] [ValidateSet("video", "builds", "phonemes", "sample")] [string]$Mode,
+    [Parameter(Mandatory)] [ValidateSet("video", "builds", "check", "phonemes", "sample")] [string]$Mode,
     [Parameter(Mandatory)] [string]$Deck,
     [Parameter(Mandatory)] [string]$Shot,
     [int]$TimeoutSeconds = 900

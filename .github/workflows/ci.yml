@@ -94,6 +94,11 @@ jobs:
           $v = & dist\deck-narrator\ffmpeg\ffmpeg.exe -hide_banner -version | Select-Object -First 1
           Write-Host $v
           if (-not ((& dist\deck-narrator\ffmpeg\ffmpeg.exe -hide_banner -encoders) -match "libx264")) { throw "bundled ffmpeg has no libx264" }
+      # Play sample's default sentence, recorded in every English voice, so it's instant.
+      - name: Pre-record voice samples
+        run: |
+          .\.venv\Scripts\python.exe packaging\prerender_samples.py dist\deck-narrator\samples
+          if ($LASTEXITCODE) { throw "prerender_samples.py failed" }
       - name: Test suite (standalone .exe)
         run: .\.venv\Scripts\python.exe test\verify.py --exe dist\deck-narrator\deck-narrator.exe --device cpu
       - name: Zip
@@ -122,7 +127,7 @@ jobs:
           if ($p.ExitCode) { Get-Content install.log -Tail 60; throw "install failed: $($p.ExitCode)" }
           $dir = "$env:ProgramFiles\Deck Narrator"
           foreach ($f in "deck-narrator.exe", "deck-narrator-gui.exe", "install-dependencies.cmd", "install-dependencies.ps1",
-                      "ffmpeg\ffmpeg.exe", "model\kokoro-v1_0.pth", "model\voices\af_heart.pt") {
+                      "ffmpeg\ffmpeg.exe", "samples", "model\kokoro-v1_0.pth", "model\voices\af_heart.pt") {
             if (-not (Test-Path "$dir\$f")) { throw "not installed: $f" }
           }
           if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Deck Narrator.lnk")) { throw "no Start menu entry" }
@@ -165,6 +170,8 @@ jobs:
           Remove-Item test\test-deck.mp4 -ErrorAction SilentlyContinue
           .\test\gui_selftest.ps1 -Gui $gui -Mode builds -Deck test\anim-deck.pptx -Shot gui-builds.png
           .\test\gui_selftest.ps1 -Gui $gui -Mode sample -Deck test\anim-deck.pptx -Shot gui-sample.png
+          if (-not (Select-String -Path "$env:TEMP\gui-selftest-sample.txt" -Pattern "saved copy" -Quiet)) { throw "the default sample wasn't the pre-recorded one" }
+          .\test\gui_selftest.ps1 -Gui $gui -Mode check -Deck test\test-deck.pptx -Shot gui-check.png
           .\test\gui_selftest.ps1 -Gui $gui -Mode video -Deck test\test-deck.pptx -Shot gui-video.png
       - name: Uninstall MSI
         run: |

@@ -10,6 +10,8 @@ Extra arguments go to deck-narrator, e.g. --device cpu. To test a packaged build
 instead of the source, put --exe PATH first:  verify.py --exe dist/deck-narrator/deck-narrator.exe
 """
 import json
+import os
+import tempfile
 import shutil
 import subprocess
 import sys
@@ -60,6 +62,47 @@ render(here / "anim-deck.pptx", {
     "voices": {"1": ["af_heart"] * 4,
                "3": ["af_heart", "am_michael", "bf_emma", "af_heart", "am_michael"],
                "4": ["am_michael"]}})
+
+
+
+def cli(*args, env=None):
+    return subprocess.run([*tool, *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          env=dict(os.environ, **(env or {})))
+
+
+# Check pronunciation, fix a word, and the sample cache, through the same program.
+print("== pronunciation check, fix and sample cache", flush=True)
+r = cli(str(here / "test-deck.pptx"), "--check-pronunciation", "--json")
+try:
+    issues = json.loads(next(l for l in r.stdout.splitlines() if l.startswith("{"))) ["issues"]
+    print(f"check: {len(issues)} word(s): {', '.join(sorted({i['word'] for i in issues}))}")
+except (StopIteration, ValueError, KeyError):
+    print(r.stdout, r.stderr)
+    failed = True
+    issues = []
+if issues:
+    i = issues[0]
+    tmpdir = Path(tempfile.mkdtemp())
+    deck = tmpdir / "fix.pptx"
+    shutil.copy(here / "test-deck.pptx", deck)
+    f = cli(str(deck), "--fix-word", str(i["slide"]), i["word"], str(i["n"]), i["options"][-1]["phonemes"])
+    after = cli(str(deck), "--check-pronunciation", "--json")
+    left = json.loads(next(l for l in after.stdout.splitlines() if l.startswith("{")))["issues"] if after.returncode == 0 else None
+    ok = f.returncode == 0 and left is not None and len(left) == len(issues) - 1 \
+        and (tmpdir / "fix (before deck-narrator).pptx").is_file()
+    print(f"fix-word: {'ok' if ok else 'FAILED'}")
+    if not ok:
+        print(f.stdout, f.stderr, after.stderr)
+    failed |= not ok
+cache = {"DECK_NARRATOR_SAMPLE_CACHE": tempfile.mkdtemp()}
+wav = Path(tempfile.mkdtemp()) / "s.wav"
+first = cli("--sample", "Cache me if you can.", "-o", str(wav), *extra, env=cache)
+second = cli("--sample", "Cache me if you can.", "-o", str(wav), *extra, env=cache)
+ok = first.returncode == 0 and second.returncode == 0 and "saved copy" in second.stderr and wav.stat().st_size > 1000
+print(f"sample cache: {'ok' if ok else 'FAILED'}")
+if not ok:
+    print(first.stderr, second.stderr)
+failed |= not ok
 
 print("ALL: FAIL" if failed else "ALL: PASS")
 sys.exit(1 if failed else 0)
