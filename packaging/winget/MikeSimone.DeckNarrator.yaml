@@ -1,0 +1,6 @@
+# winget manifest (version). packaging/publish-packages.ps1 fills in __VERSION__ and submits.
+PackageIdentifier: MikeSimone.DeckNarrator
+PackageVersion: __VERSION__
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

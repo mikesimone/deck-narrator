@@ -1,0 +1,31 @@
+# Builds (and with "submit", sends) the winget and Chocolatey packages for a release that's
+# already published. ci.yml does the same after each release; this is for re-running it.
+name: packages
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Released version, e.g. 1.2.5"
+        required: true
+      submit:
+        description: "Submit to winget and Chocolatey (needs the WINGET_TOKEN / CHOCO_API_KEY secrets)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, test-install with Chocolatey, submit
+        shell: pwsh
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          $submit = "${{ inputs.submit }}" -eq "true"
+          .\packaging\publish-packages.ps1 -Version "${{ inputs.version }}" -TestInstall -Submit:$submit

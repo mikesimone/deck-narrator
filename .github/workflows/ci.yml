@@ -211,3 +211,10 @@ jobs:
           $notes = if (Test-Path "docs\release-notes\$tag.md") { @("--notes-file", "docs\release-notes\$tag.md") } else { @("--generate-notes") }
           gh release create $tag deck-narrator-$env:VERSION-x64.msi deck-narrator-windows-x64.zip --target $env:GITHUB_SHA --title $tag @notes
           if ($LASTEXITCODE) { throw "gh release create failed" }
+      - name: winget and Chocolatey packages
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release
+        continue-on-error: true   # the release is out either way; packages.yml can redo this
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: .\packaging\publish-packages.ps1 -Version $env:VERSION -Msi deck-narrator-$env:VERSION-x64.msi -Submit
