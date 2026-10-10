@@ -78,7 +78,8 @@ if ($Submit) {
         $wc = Join-Path $out "wingetcreate.exe"
         & curl.exe -L --fail --retry 3 -s -o $wc "https://aka.ms/wingetcreate/latest"
         if ($LASTEXITCODE) { throw "couldn't download wingetcreate" }
-        & $wc submit --token $env:WINGET_TOKEN --prtitle "New version: MikeSimone.DeckNarrator version $Version" "$out\winget"
+        $env:WINGET_CREATE_GITHUB_TOKEN = $env:WINGET_TOKEN     # read from the environment, so it's never on a command line
+        & $wc submit --prtitle "New version: MikeSimone.DeckNarrator version $Version" "$out\winget"
         if ($LASTEXITCODE) { throw "wingetcreate submit failed: $LASTEXITCODE" }
     } else { Write-Host "winget: built, not submitted (no WINGET_TOKEN)" }
     if ($env:CHOCO_API_KEY) {
