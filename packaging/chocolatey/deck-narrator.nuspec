@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Chocolatey package for Deck Narrator. packaging/publish-packages.ps1 fills in the
+     version and the installer's checksum, packs it, test-installs it and pushes it. -->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>deck-narrator</id>
+    <version>__VERSION__</version>
+    <title>Deck Narrator</title>
+    <authors>Mike Simone</authors>
+    <owners>mikesimone</owners>
+    <projectUrl>https://github.com/mikesimone/deck-narrator</projectUrl>
+    <packageSourceUrl>https://github.com/mikesimone/deck-narrator/tree/main/packaging/chocolatey</packageSourceUrl>
+    <projectSourceUrl>https://github.com/mikesimone/deck-narrator</projectSourceUrl>
+    <docsUrl>https://github.com/mikesimone/deck-narrator#readme</docsUrl>
+    <bugTrackerUrl>https://github.com/mikesimone/deck-narrator/issues</bugTrackerUrl>
+    <releaseNotes>https://github.com/mikesimone/deck-narrator/releases/tag/v__VERSION__</releaseNotes>
+    <iconUrl>https://cdn.jsdelivr.net/gh/mikesimone/deck-narrator@main/packaging/deck-narrator.png</iconUrl>
+    <licenseUrl>https://github.com/mikesimone/deck-narrator/blob/main/THIRD-PARTY-NOTICES.md</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <tags>powerpoint pptx text-to-speech tts narration video presentation kokoro offline</tags>
+    <summary>Turns a PowerPoint deck's speaker notes into a narrated MP4, offline.</summary>
+    <description>Deck Narrator turns the speaker notes of a PowerPoint deck (.pptx) into a narrated MP4 video. Each slide is shown while a natural-sounding voice reads its notes, and slide animations are stepped through with `[click]` markers.
+
+- Runs fully offline: the Kokoro-82M voice model and voices are included, so nothing is sent anywhere.
+- A window (Start menu: Deck Narrator) and a command line (`deck-narrator`) that can do the same things.
+- Check pronunciation finds words that may be said wrong, lets you hear each way and fixes them.
+- Draws slides with PowerPoint when it's installed, otherwise with LibreOffice. If neither is installed, use the window's **Install LibreOffice** button, which installs a minimal copy that leaves Office's file types alone.
+
+This package downloads and runs the official installer from the project's GitHub releases (about 590 MB, including the voices). The program is distributed under the GPL-3.0 as a whole (its own code is MIT), as listed in THIRD-PARTY-NOTICES.md.</description>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

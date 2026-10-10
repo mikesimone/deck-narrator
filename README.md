@@ -72,6 +72,14 @@ unknown publisher. Choose **More info**, then **Run anyway**. They're built from
 repository by GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), not on
 anyone's PC, and the Releases page lists each file's SHA-256.
 
+**Windows, with winget or Chocolatey** (once each has accepted the package): the same
+installer, without the "unknown publisher" warning:
+
+```powershell
+winget install MikeSimone.DeckNarrator
+choco install deck-narrator
+```
+
 **Windows, standalone zip.** `deck-narrator-windows-x64.zip` on the same page is the same
 program without an installer: unzip it anywhere and run `deck-narrator-gui.exe` or
 `deck-narrator.exe`. It includes ffmpeg and `install-dependencies.cmd`, and downloads the
@@ -674,7 +682,7 @@ The test outputs (`test/*-deck.pptx`, `test/*-deck.mp4`) are gitignored.
 | `deck-narrator-gui`, `deck-narrator-gui.cmd` | GUI wrappers for Linux and Windows |
 | `setup.sh`, `setup.ps1` | Install everything, on Linux and Windows |
 | `requirements.txt` | Python deps (torch is installed separately, from PyTorch's index) |
-| `packaging/` | The PyInstaller spec (both programs), the icon and logo (`make_art.py` draws them and the installer images, in the brand colors), `fetch_model.py` (bundles the voices), `prerender_samples.py` (records the default sample in every English voice), `install-dependencies.ps1`/`.cmd` (the minimal LibreOffice install), what goes in the zip besides the programs, and `installer/` (the WiX source, license page and banner images for the MSI) |
+| `packaging/` | The PyInstaller spec (both programs), the icon and logo (`make_art.py` draws them and the installer images, in the brand colors), `fetch_model.py` (bundles the voices), `prerender_samples.py` (records the default sample in every English voice), `install-dependencies.ps1`/`.cmd` (the minimal LibreOffice install), what goes in the zip besides the programs, `installer/` (the WiX source, license page and banner images for the MSI), and `winget/`, `chocolatey/` and `publish-packages.ps1` (the winget and Chocolatey packages, built and submitted after each release) |
 | `.github/workflows/ci.yml` | Tests on Linux and Windows, builds the zip and the MSI, tests the installed MSI, attaches both to releases |
 | `LICENSE`, `THIRD-PARTY-NOTICES.md` | MIT for this code; what the zip and installer bundle and under which licenses |
 | `docs/PRONUNCIATION.md` | The full pronunciation guide |
