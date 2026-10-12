@@ -46,7 +46,18 @@ itself from [its own deck](examples/how-to/).
 
 ## Install
 
-**Windows, installer (simplest).** Download `deck-narrator-<version>-x64.msi` from the
+**Windows, with Chocolatey (best).** One command installs the same MSI, checks its SHA-256,
+and skips the SmartScreen "Windows protected your PC" step. `choco upgrade deck-narrator`
+updates it later. In an admin PowerShell:
+
+```powershell
+choco install deck-narrator
+```
+
+winget (`winget install MikeSimone.DeckNarrator`) will work the same way once Microsoft
+accepts the package.
+
+**Windows, installer.** Download `deck-narrator-<version>-x64.msi` from the
 [Releases](../../releases) page and run it. It installs to `Program Files\Deck Narrator` for
 all users, adds **Deck Narrator** to the Start menu, and puts `deck-narrator.exe` on the
 system PATH. The voice model, all its voices and ffmpeg are included (the MSI is large
@@ -71,14 +82,6 @@ The Windows releases aren't code-signed, so Windows may warn that the installer 
 unknown publisher. Choose **More info**, then **Run anyway**. They're built from this
 repository by GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)), not on
 anyone's PC, and the Releases page lists each file's SHA-256.
-
-**Windows, with winget or Chocolatey** (once each has accepted the package): the same
-installer, without the SmartScreen "Windows protected your PC" step:
-
-```powershell
-winget install MikeSimone.DeckNarrator
-choco install deck-narrator
-```
 
 **Windows, standalone zip.** `deck-narrator-windows-x64.zip` on the same page is the same
 program without an installer: unzip it anywhere and run `deck-narrator-gui.exe` or

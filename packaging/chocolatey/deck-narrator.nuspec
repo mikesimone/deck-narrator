@@ -7,6 +7,7 @@
     <version>__VERSION__</version>
     <title>Deck Narrator</title>
     <authors>Mike Simone</authors>
+    <copyright>Copyright (c) 2026 Mike Simone</copyright>
     <owners>mikesimone</owners>
     <projectUrl>https://github.com/mikesimone/deck-narrator</projectUrl>
     <packageSourceUrl>https://github.com/mikesimone/deck-narrator/tree/main/packaging/chocolatey</packageSourceUrl>
@@ -15,7 +16,7 @@
     <bugTrackerUrl>https://github.com/mikesimone/deck-narrator/issues</bugTrackerUrl>
     <releaseNotes>https://github.com/mikesimone/deck-narrator/releases/tag/v__VERSION__</releaseNotes>
     <iconUrl>https://cdn.jsdelivr.net/gh/mikesimone/deck-narrator@main/packaging/deck-narrator.png</iconUrl>
-    <licenseUrl>https://github.com/mikesimone/deck-narrator/blob/main/THIRD-PARTY-NOTICES.md</licenseUrl>
+    <licenseUrl>https://github.com/mikesimone/deck-narrator/blob/main/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <tags>powerpoint pptx text-to-speech tts narration video presentation kokoro offline</tags>
     <summary>Turns a PowerPoint deck's speaker notes into a narrated MP4, offline.</summary>
