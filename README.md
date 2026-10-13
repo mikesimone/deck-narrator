@@ -25,8 +25,6 @@ Pick your computer. Each link opens a short, step-by-step page.
 </tr>
 </table>
 
-The Mac download arrives with the next release after 1.2.5.
-
 ## Make a video
 
 1. In PowerPoint, type what should be said in each slide's **speaker notes** (View > Notes).
