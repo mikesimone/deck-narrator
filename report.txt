@@ -1,0 +1,132 @@
+1-af_heart: 1.77s, longest pause 0.04s | We use AI here. | heard: We use AI here.
+2-af_heart: 1.77s, longest pause 0.01s | We use [AI](/ˌAˈI/) here. | heard: We use AI here.
+3-af_heart: 1.75s, longest pause 0.01s | We use [AI](/ˌAjˈI/) here. | heard: We use AI here.
+4-af_heart: 1.77s, longest pause 0.01s | We use [AI](/ˈAˈI/) here. | heard: We use AI here.
+5-af_heart: 1.90s, longest pause 0.04s | We use API here. | heard: We use API here.
+6-af_heart: 1.90s, longest pause 0.05s | We use [API](/ˈApˌiˈI/) here. | heard: We use API here.
+7-af_heart: 1.95s, longest pause 0.05s | We use [API](/ˌApˈiˈI/) here. | heard: We'll use API here.
+8-af_heart: 1.93s, longest pause 0.05s | We use [API](/ˌAˌpiˈI/) here. | heard: We use AAPI here.
+9-af_heart: 1.95s, longest pause 0.05s | We use APIs here. | heard: We use APIs here.
+10-af_heart: 1.95s, longest pause 0.04s | We use [APIs](/ˌApˈiˈIz/) here. | heard: We use APIs here.
+11-af_heart: 1.88s, longest pause 0.06s | We use IPv4 here. | heard: We use Ip4 here.
+12-af_heart: 2.17s, longest pause 0.06s | We use [IPv4](/ˌIpˌivˈi fˈɔɹ/) here. | heard: We use IPV4 here.
+13-af_heart: 1.77s, longest pause 0.04s | We use 2FA here. | heard: We use Tufa here.
+14-af_heart: 1.90s, longest pause 0.08s | We use [2FA](/tˈu ˌɛfˈA/) here. | heard: We use two FA here.
+15-af_heart: 1.90s, longest pause 0.03s | We use IAM here. | heard: We use IAM here.
+16-af_heart: 1.80s, longest pause 0.02s | We use [IAM](/ˈIˌæm/) here. | heard: We use IAM here.
+17-af_heart: 2.00s, longest pause 0.05s | We use JSON here. | heard: We use JSON here.
+18-af_heart: 1.82s, longest pause 0.05s | We use [JSON](/ʤˈAsᵊn/) here. | heard: We use Jason here.
+19-af_heart: 2.10s, longest pause 0.01s | We use YAML here. | heard: We use YAML here.
+20-af_heart: 1.88s, longest pause 0.03s | We use [YAML](/jˈæməl/) here. | heard: We use gammel here.
+21-af_heart: 2.05s, longest pause 0.07s | We use SAML here. | heard: We use S-A-M-L here.
+22-af_heart: 1.73s, longest pause 0.05s | We use [SAML](/sˈæməl/) here. | heard: We use SAML here.
+23-af_heart: 2.08s, longest pause 0.07s | We use LDAP here. | heard: We use LDAP here.
+24-af_heart: 1.77s, longest pause 0.05s | We use [LDAP](/ˈɛldˌæp/) here. | heard: We use LDAP here.
+25-af_heart: 2.15s, longest pause 0.07s | We use SCADA here. | heard: We use SCADA here.
+26-af_heart: 1.73s, longest pause 0.03s | We use [SCADA](/skˈAdə/) here. | heard: We use SCADA here.
+27-af_heart: 2.05s, longest pause 0.05s | We use SIEM here. | heard: We use S-I-E-M here.
+28-af_heart: 1.65s, longest pause 0.00s | We use [SIEM](/sˈɪm/) here. | heard: We use them here.
+29-af_heart: 1.68s, longest pause 0.02s | We use SOC here. | heard: We use those here.
+30-af_heart: 1.65s, longest pause 0.05s | We use [SOC](/sˈɑk/) here. | heard: We use SOC here.
+31-af_heart: 2.00s, longest pause 0.06s | We use CISO here. | heard: We use CISO here.
+32-af_heart: 1.73s, longest pause 0.00s | We use [CISO](/sˈisO/) here. | heard: We use CISO here.
+33-af_heart: 2.30s, longest pause 0.06s | We use OWASP here. | heard: We use OWSB here.
+34-af_heart: 1.80s, longest pause 0.04s | We use [OWASP](/ˈOwˌɑsp/) here. | heard: We use O-Wasp here.
+35-af_heart: 1.77s, longest pause 0.04s | We use DoS here. | heard: We use DO-US here.
+36-af_heart: 1.73s, longest pause 0.04s | We use [DoS](/dˈɔs/) here. | heard: We use DOS here.
+37-af_heart: 2.05s, longest pause 0.07s | We use SASE here. | heard: We use S-A-S-E here.
+38-af_heart: 1.73s, longest pause 0.01s | We use [SASE](/sˈæsi/) here. | heard: We use Sassy here.
+39-af_heart: 2.05s, longest pause 0.05s | We use CASB here. | heard: Will you see ASB here?
+40-af_heart: 1.80s, longest pause 0.05s | We use [CASB](/kˈæzbˌi/) here. | heard: We use CASB here.
+41-af_heart: 2.12s, longest pause 0.05s | We use FIPS here. | heard: We use FIPS here.
+42-af_heart: 1.68s, longest pause 0.04s | We use [FIPS](/fˈɪps/) here. | heard: We use FIPS here.
+43-af_heart: 1.77s, longest pause 0.05s | We use PaaS here. | heard: We use PAH-S here.
+44-af_heart: 1.73s, longest pause 0.04s | We use [PaaS](/pˈæs/) here. | heard: We use pass here.
+45-af_heart: 1.77s, longest pause 0.02s | We use IaaS here. | heard: We use IaaS here.
+46-af_heart: 1.77s, longest pause 0.02s | We use [IaaS](/ˈIæs/) here. | heard: We use IS here.
+47-af_heart: 1.77s, longest pause 0.05s | We use PoC here. | heard: We use POCI here.
+48-af_heart: 1.88s, longest pause 0.06s | We use [PoC](/pˌiˌOsˈi/) here. | heard: We use POC here.
+49-af_heart: 1.73s, longest pause 0.01s | We use AWS here. | heard: We use Oz here.
+50-af_heart: 2.15s, longest pause 0.05s | We use [AWS](/ˌAdˌʌbᵊljuˈɛs/) here. | heard: We use AWS here.
+51-af_heart: 1.82s, longest pause 0.05s | We use IoT here. | heard: We use IoT here.
+52-af_heart: 1.93s, longest pause 0.06s | We use [IoT](/ˌIˌOtˈi/) here. | heard: We use IoT here.
+53-af_heart: 1.88s, longest pause 0.07s | We use ISO here. | heard: We use ISO here.
+54-af_heart: 1.77s, longest pause 0.05s | We use [ISO](/ˈIsO/) here. | heard: We use ISO here.
+55-af_heart: 1.85s, longest pause 0.01s | We use Redis here. | heard: We use Redis here.
+56-af_heart: 1.77s, longest pause 0.02s | We use [Redis](/ɹˈɛdɪs/) here. | heard: We use Redis here.
+57-af_heart: 2.35s, longest pause 0.06s | We use PostgreSQL here. | heard: We use poster SQL here.
+58-af_heart: 2.23s, longest pause 0.05s | We use [PostgreSQL](/pˈOstɡɹɛs kjˌuˈɛl/) here. | heard: We use Postgres QL here.
+59-af_heart: 1.80s, longest pause 0.04s | We use PyPI here. | heard: We use PIPI here.
+60-af_heart: 1.93s, longest pause 0.05s | We use [PyPI](/pˈI pˌiˈI/) here. | heard: We use PIPI here.
+61-af_heart: 2.62s, longest pause 0.08s | We use OPSWAT here. | heard: We use OPSWAT here.
+62-af_heart: 1.90s, longest pause 0.08s | We use [OPSWAT](/ˈɑpswˌɑt/) here. | heard: We use op-swat here.
+63-af_heart: 1.88s, longest pause 0.03s | We use GenAI here. | heard: We use gen AI here.
+64-af_heart: 1.80s, longest pause 0.02s | We use [GenAI](/ʤˌɛnˌAˈI/) here. | heard: We use Gennai here.
+65-af_heart: 1.95s, longest pause 0.05s | We use OpenAI here. | heard: We use OpenAI here.
+66-af_heart: 1.98s, longest pause 0.06s | We use [OpenAI](/ˌOpᵊnˌAˈI/) here. | heard: We use OpenAI here.
+1-am_michael: 2.15s, longest pause 0.07s | We use AI here. | heard: We use AI here
+2-am_michael: 2.17s, longest pause 0.06s | We use [AI](/ˌAˈI/) here. | heard: We use AI here
+3-am_michael: 2.17s, longest pause 0.06s | We use [AI](/ˌAjˈI/) here. | heard: We use AI here
+4-am_michael: 2.10s, longest pause 0.05s | We use [AI](/ˈAˈI/) here. | heard: We use AI here
+5-am_michael: 2.23s, longest pause 0.05s | We use API here. | heard: We use API here
+6-am_michael: 2.20s, longest pause 0.06s | We use [API](/ˈApˌiˈI/) here. | heard: We use API here
+7-am_michael: 2.23s, longest pause 0.06s | We use [API](/ˌApˈiˈI/) here. | heard: We use API here
+8-am_michael: 2.23s, longest pause 0.06s | We use [API](/ˌAˌpiˈI/) here. | heard: We use AMPI here
+9-am_michael: 2.27s, longest pause 0.05s | We use APIs here. | heard: We use APIs here
+10-am_michael: 2.25s, longest pause 0.05s | We use [APIs](/ˌApˈiˈIz/) here. | heard: We use APIs here
+11-am_michael: 2.23s, longest pause 0.07s | We use IPv4 here. | heard: We use ip4 here
+12-am_michael: 2.50s, longest pause 0.07s | We use [IPv4](/ˌIpˌivˈi fˈɔɹ/) here. | heard: We use IPv4 here
+13-am_michael: 2.05s, longest pause 0.04s | We use 2FA here. | heard: We use too far here
+14-am_michael: 2.25s, longest pause 0.04s | We use [2FA](/tˈu ˌɛfˈA/) here. | heard: We use two FA here
+15-am_michael: 2.30s, longest pause 0.06s | We use IAM here. | heard: We use IAM here
+16-am_michael: 2.12s, longest pause 0.06s | We use [IAM](/ˈIˌæm/) here. | heard: We use IM here
+17-am_michael: 2.38s, longest pause 0.06s | We use JSON here. | heard: We use JSO in here
+18-am_michael: 2.08s, longest pause 0.05s | We use [JSON](/ʤˈAsᵊn/) here. | heard: We use Jason here
+19-am_michael: 2.42s, longest pause 0.05s | We use YAML here. | heard: We use YAML here
+20-am_michael: 2.15s, longest pause 0.02s | We use [YAML](/jˈæməl/) here. | heard: We use YAML here.
+21-am_michael: 2.45s, longest pause 0.08s | We use SAML here. | heard: We use SAML here
+22-am_michael: 1.98s, longest pause 0.03s | We use [SAML](/sˈæməl/) here. | heard: We use SAML here.
+23-am_michael: 2.42s, longest pause 0.07s | We use LDAP here. | heard: We use LDAP here
+24-am_michael: 2.10s, longest pause 0.05s | We use [LDAP](/ˈɛldˌæp/) here. | heard: We use LDAP here
+25-am_michael: 2.50s, longest pause 0.08s | We use SCADA here. | heard: We'll use SCADA here
+26-am_michael: 1.98s, longest pause 0.05s | We use [SCADA](/skˈAdə/) here. | heard: Will you skate here?
+27-am_michael: 2.45s, longest pause 0.08s | We use SIEM here. | heard: We use SIEM here.
+28-am_michael: 1.88s, longest pause 0.01s | We use [SIEM](/sˈɪm/) here. | heard: We use them here
+29-am_michael: 1.90s, longest pause 0.05s | We use SOC here. | heard: We use such here
+30-am_michael: 1.90s, longest pause 0.08s | We use [SOC](/sˈɑk/) here. | heard: Will you sock here?
+31-am_michael: 2.27s, longest pause 0.03s | We use CISO here. | heard: Will you see ISO here?
+32-am_michael: 1.98s, longest pause 0.00s | We use [CISO](/sˈisO/) here. | heard: We'll use CISO here.
+33-am_michael: 2.80s, longest pause 0.08s | We use OWASP here. | heard: We use OWASP here.
+34-am_michael: 2.12s, longest pause 0.07s | We use [OWASP](/ˈOwˌɑsp/) here. | heard: We use OWASP here.
+35-am_michael: 2.10s, longest pause 0.04s | We use DoS here. | heard: We use DuS here.
+36-am_michael: 2.02s, longest pause 0.05s | We use [DoS](/dˈɔs/) here. | heard: We use DOS here.
+37-am_michael: 2.38s, longest pause 0.05s | We use SASE here. | heard: We use SASC here.
+38-am_michael: 2.02s, longest pause 0.03s | We use [SASE](/sˈæsi/) here. | heard: We use sassy here
+39-am_michael: 2.30s, longest pause 0.07s | We use CASB here. | heard: Will you see as be here?
+40-am_michael: 2.12s, longest pause 0.05s | We use [CASB](/kˈæzbˌi/) here. | heard: We use CASB here
+41-am_michael: 2.48s, longest pause 0.06s | We use FIPS here. | heard: We use FIPS here
+42-am_michael: 1.90s, longest pause 0.06s | We use [FIPS](/fˈɪps/) here. | heard: We use FIPS here.
+43-am_michael: 2.00s, longest pause 0.06s | We use PaaS here. | heard: We use Pius here.
+44-am_michael: 1.95s, longest pause 0.06s | We use [PaaS](/pˈæs/) here. | heard: We use pass here
+45-am_michael: 2.23s, longest pause 0.07s | We use IaaS here. | heard: We use IIS here
+46-am_michael: 2.10s, longest pause 0.06s | We use [IaaS](/ˈIæs/) here. | heard: We use IS here
+47-am_michael: 2.05s, longest pause 0.07s | We use PoC here. | heard: We use posy here
+48-am_michael: 2.20s, longest pause 0.07s | We use [PoC](/pˌiˌOsˈi/) here. | heard: We use PLC here.
+49-am_michael: 1.98s, longest pause 0.05s | We use AWS here. | heard: We use OZ here.
+50-am_michael: 2.58s, longest pause 0.10s | We use [AWS](/ˌAdˌʌbᵊljuˈɛs/) here. | heard: We use AWS here
+51-am_michael: 2.20s, longest pause 0.05s | We use IoT here. | heard: We use IoT here
+52-am_michael: 2.23s, longest pause 0.04s | We use [IoT](/ˌIˌOtˈi/) here. | heard: We use IoT here.
+53-am_michael: 2.27s, longest pause 0.06s | We use ISO here. | heard: We use ISO here
+54-am_michael: 2.00s, longest pause 0.04s | We use [ISO](/ˈIsO/) here. | heard: We use ISO here
+55-am_michael: 2.12s, longest pause 0.03s | We use Redis here. | heard: We use Redis here.
+56-am_michael: 2.12s, longest pause 0.05s | We use [Redis](/ɹˈɛdɪs/) here. | heard: We use Redis here
+57-am_michael: 2.70s, longest pause 0.09s | We use PostgreSQL here. | heard: We use Postgar SQL here.
+58-am_michael: 2.58s, longest pause 0.07s | We use [PostgreSQL](/pˈOstɡɹɛs kjˌuˈɛl/) here. | heard: We use Postgres QL here
+59-am_michael: 2.20s, longest pause 0.07s | We use PyPI here. | heard: We use Pi-Pi here.
+60-am_michael: 2.33s, longest pause 0.07s | We use [PyPI](/pˈI pˌiˈI/) here. | heard: We use PI PI here.
+61-am_michael: 3.02s, longest pause 0.08s | We use OPSWAT here. | heard: We use OPSWAT here.
+62-am_michael: 2.12s, longest pause 0.05s | We use [OPSWAT](/ˈɑpswˌɑt/) here. | heard: We use Opswad here.
+63-am_michael: 2.23s, longest pause 0.09s | We use GenAI here. | heard: We use gem AI here
+64-am_michael: 2.25s, longest pause 0.10s | We use [GenAI](/ʤˌɛnˌAˈI/) here. | heard: We use gen AI here
+65-am_michael: 2.27s, longest pause 0.08s | We use OpenAI here. | heard: We use OpenAI here
+66-am_michael: 2.30s, longest pause 0.07s | We use [OpenAI](/ˌOpᵊnˌAˈI/) here. | heard: We use OpenAI here.
