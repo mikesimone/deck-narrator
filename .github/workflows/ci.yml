@@ -43,7 +43,7 @@ jobs:
   # have no Metal GPU, so the suite runs on the CPU.
   macos:
     runs-on: macos-14
-    timeout-minutes: 60
+    timeout-minutes: 150
     env:
       # Keynote automation needs a person to allow it once, so CI draws with LibreOffice.
       DECK_NARRATOR_RENDERER: libreoffice
@@ -61,6 +61,65 @@ jobs:
         run: |
           .venv/bin/python gui.py --selftest builds test/anim-deck.pptx "$RUNNER_TEMP/gui.txt" 0
           cat "$RUNNER_TEMP/gui.txt"
+      # The Mac app: PyInstaller's "Deck Narrator.app" (GUI first, the command-line program
+      # beside it), with ffmpeg, the pre-recorded samples and the voice model in
+      # Contents/Resources so it works offline. Unsigned (no Apple developer account), so it
+      # is ad-hoc signed as a whole; macOS asks once to allow it (Privacy & Security).
+      - name: Build Deck Narrator.app (PyInstaller)
+        run: |
+          VERSION=$(.venv/bin/python narrate.py --version | cut -d" " -f2)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          uv pip install --python .venv/bin/python pyinstaller imageio-ffmpeg
+          DECK_NARRATOR_VERSION=$VERSION .venv/bin/pyinstaller --noconfirm packaging/deck-narrator.spec
+          APP="dist/Deck Narrator.app"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          main=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist")
+          [ "$main" = "deck-narrator-gui" ] || { echo "the app opens $main, not the GUI"; exit 1; }
+          test -x "$APP/Contents/MacOS/deck-narrator"
+      - name: Bundle ffmpeg, samples and the voice model
+        run: |
+          R="$APP/Contents/Resources"
+          mkdir -p "$R/ffmpeg"
+          cp "$(.venv/bin/python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" "$R/ffmpeg/ffmpeg"
+          chmod +x "$R/ffmpeg/ffmpeg"
+          "$R/ffmpeg/ffmpeg" -hide_banner -version | head -1
+          "$R/ffmpeg/ffmpeg" -hide_banner -encoders | grep -q libx264 || { echo "bundled ffmpeg has no libx264"; exit 1; }
+          .venv/bin/python packaging/prerender_samples.py "$R/samples"
+          .venv/bin/python packaging/fetch_model.py "$R/model"
+          cp README.md LICENSE THIRD-PARTY-NOTICES.md "$R/"
+          cp -R packaging/licenses "$R/licenses"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+      # An empty HuggingFace cache and offline mode: everything must come from the app.
+      - name: Test suite (app, offline)
+        env:
+          HF_HUB_OFFLINE: "1"
+          HF_HOME: ${{ runner.temp }}/empty-hf
+        run: |
+          .venv/bin/python test/verify.py --exe "$APP/Contents/MacOS/deck-narrator" --device cpu
+          "$APP/Contents/MacOS/deck-narrator-gui" --selftest builds test/anim-deck.pptx "$RUNNER_TEMP/gui-app.txt" 0
+          cat "$RUNNER_TEMP/gui-app.txt"
+      - name: Disk image (.dmg)
+        run: |
+          mkdir dmg
+          cp -R "$APP" dmg/
+          ln -s /Applications dmg/Applications
+          cp packaging/MAC-README.txt "dmg/Read me first.txt"
+          hdiutil create -volname "Deck Narrator" -srcfolder dmg -ov -format UDZO "deck-narrator-$VERSION-mac-arm64.dmg"
+          ls -l "deck-narrator-$VERSION-mac-arm64.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deck-narrator-mac
+          path: deck-narrator-${{ env.VERSION }}-mac-arm64.dmg
+          retention-days: 14
+      # The Windows job creates the release; this adds the .dmg to it once it exists.
+      - name: Add to release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 90); do gh release view "v$VERSION" >/dev/null 2>&1 && break; sleep 60; done
+          gh release upload "v$VERSION" "deck-narrator-$VERSION-mac-arm64.dmg" --clobber
 
   windows:
     runs-on: windows-latest

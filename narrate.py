@@ -394,8 +394,14 @@ INSTALL_HINT = {
 
 
 def app_dir():
-    """The folder the program lives in: next to the .exe when frozen, else this file's."""
-    return Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
+    """Where the program's bundled files (ffmpeg/, model/, samples/) live: next to the .exe
+    when frozen, Contents/Resources inside the Mac app, else this file's folder."""
+    if not getattr(sys, "frozen", False):
+        return Path(__file__).resolve().parent
+    exe_dir = Path(sys.executable).parent
+    if IS_MAC and exe_dir.name == "MacOS":
+        return exe_dir.parent / "Resources"
+    return exe_dir
 
 
 def find_ffmpeg():

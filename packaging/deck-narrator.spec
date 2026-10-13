@@ -2,12 +2,16 @@
 # command-line program (deck-narrator[.exe]) and the GUI (deck-narrator-gui[.exe]),
 # which share one copy of the libraries.
 # Build from the repo root:  pyinstaller packaging/deck-narrator.spec
-# The GitHub Actions workflow (.github/workflows/ci.yml) builds the Windows zip with this.
+# The GitHub Actions workflow (.github/workflows/ci.yml) builds the Windows zip with this,
+# and on macOS the app, "Deck Narrator.app", whose main program is the GUI.
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_all, copy_metadata
 
-ICON = os.path.join(SPECPATH, "deck-narrator.ico")
+MAC = sys.platform == "darwin"
+# PyInstaller turns the PNG into the Mac's .icns (it needs Pillow, which the venv has).
+ICON = os.path.join(SPECPATH, "deck-narrator.png" if MAC else "deck-narrator.ico")
 
 datas, binaries, hiddenimports = [], [], []
 # Packages that load data files, plugins or entry points at runtime.
@@ -48,4 +52,22 @@ gpyz = PYZ(g.pure)
 gexe = EXE(gpyz, g.scripts, [], exclude_binaries=True, name="deck-narrator-gui", console=False,
            icon=ICON)
 
-coll = COLLECT(exe, a.binaries, a.datas, gexe, g.binaries, g.datas, name="deck-narrator")
+if not MAC:
+    coll = COLLECT(exe, a.binaries, a.datas, gexe, g.binaries, g.datas, name="deck-narrator")
+else:
+    # The GUI first: the app bundle launches the first program it holds.
+    coll = COLLECT(gexe, g.binaries, g.datas, exe, a.binaries, a.datas, name="deck-narrator")
+    app = BUNDLE(
+        coll,
+        name="Deck Narrator.app",
+        icon=ICON,
+        bundle_identifier="io.github.mikesimone.deck-narrator",
+        info_plist={
+            "CFBundleDisplayName": "Deck Narrator",
+            "CFBundleShortVersionString": os.environ.get("DECK_NARRATOR_VERSION", "0"),
+            "NSHighResolutionCapable": True,
+            "LSMinimumSystemVersion": "12.0",
+            # Shown when the app first asks to drive Keynote, which draws the slides.
+            "NSAppleEventsUsageDescription": "Deck Narrator uses Keynote to draw your slides.",
+        },
+    )
