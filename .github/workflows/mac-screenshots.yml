@@ -49,12 +49,31 @@ jobs:
           xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "/Applications/Deck Narrator.app"
           t open "/Applications/Deck Narrator.app" || true
           shot 2-first-open 10
-          t osascript -e 'tell application "System Events" to key code 53' || true   # Esc closes the warning
+          # Click Done on the warning (Esc doesn't close it); kill the dialog agent if that fails.
+          t osascript -e 'tell application "System Events" to tell process "CoreServicesUIAgent" to click button "Done" of window 1' || \
+            t killall CoreServicesUIAgent || true
+          sleep 2
           t open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension" || \
             t open "x-apple.systempreferences:com.apple.preference.security"
           shot 3-privacy-security 8
-          # Scroll to the bottom, where "Open Anyway" is.
-          t osascript -e 'tell application "System Events" to tell process "System Settings" to key code 119' || true
+          # Scroll the right-hand pane to the bottom, where "Open Anyway" is.
+          cat > scroll.applescript <<'OSA'
+          tell application "System Events" to tell process "System Settings"
+            repeat with e in (entire contents of window 1)
+              try
+                if class of e is scroll bar and orientation of e is "AXVerticalOrientation" then set value of e to 1.0
+              end try
+            end repeat
+            set names to {}
+            repeat with e in (entire contents of window 1)
+              try
+                if class of e is button then set end of names to (name of e as text)
+              end try
+            end repeat
+            return names
+          end tell
+          OSA
+          t osascript scroll.applescript || true
           shot 4-open-anyway 4
           t osascript -e 'quit app "System Settings"' || true
           # The app itself, once allowed.
