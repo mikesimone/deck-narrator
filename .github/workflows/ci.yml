@@ -73,6 +73,9 @@ jobs:
           DECK_NARRATOR_VERSION=$VERSION .venv/bin/pyinstaller --noconfirm packaging/deck-narrator.spec
           APP="dist/Deck Narrator.app"
           echo "APP=$APP" >> "$GITHUB_ENV"
+          # PyInstaller names the folder's program as the app's; the app should open the GUI.
+          # (Re-signed after the next step adds files.)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable deck-narrator-gui" "$APP/Contents/Info.plist"
           main=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist")
           [ "$main" = "deck-narrator-gui" ] || { echo "the app opens $main, not the GUI"; exit 1; }
           test -x "$APP/Contents/MacOS/deck-narrator"
