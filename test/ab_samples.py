@@ -36,6 +36,8 @@ for v in ("af_heart", "am_michael"):
         subprocess.run([str(here / ".venv/bin/python"), str(here / "narrate.py"), "--voice", v, "--sample", t,
                         "-o", str(f)], check=True, capture_output=True)
         wav, sr = sf.read(f)
-        heard = " ".join(s.text.strip() for s in whisper.transcribe(str(f), language="en")[0])
+        mono = wav if wav.ndim == 1 else wav.mean(axis=1)
+        at16k = np.interp(np.arange(0, len(mono), sr / 16000), np.arange(len(mono)), mono).astype(np.float32)
+        heard = " ".join(s.text.strip() for s in whisper.transcribe(at16k, language="en")[0])
         lines.append(f"{i}-{v}: {len(wav) / sr:.2f}s, longest pause {longest_pause(wav, sr):.2f}s | {t} | heard: {heard}")
 (out / "report.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
