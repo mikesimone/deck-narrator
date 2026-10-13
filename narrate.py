@@ -23,6 +23,11 @@ from pathlib import Path
 
 import builds as anim
 
+# Kokoro uses a few ops Apple's Metal backend lacks; let torch run those on the CPU
+# instead of failing. Must be set before torch is imported.
+if sys.platform == "darwin":
+    os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
 VERSION = "1.2.5"
 SAMPLE_RATE = 24000          # Kokoro's native output rate
 FPS = 30
@@ -109,7 +114,8 @@ def build_parser():
     p.add_argument("--show-builds", action="store_true", help="print each selected slide's build steps and how the notes' [click]s line up, and exit (no video)")
     p.add_argument("--pronunciations", metavar="FILE", help="word=replacement file applied to notes before TTS "
                    "(default: your personal dictionary, if you have one; see --add-word)")
-    p.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto", help="where Kokoro runs (default: auto = cuda if available)")
+    p.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default="auto",
+                   help="where Kokoro runs (default: auto = NVIDIA cuda, else Apple Silicon mps, else cpu)")
     p.add_argument("--renderer", choices=["auto", "powerpoint", "libreoffice"], default="auto",
                    help="what draws the slides (default: auto = PowerPoint if it's installed, else LibreOffice)")
     p.add_argument("--show-phonemes", action="store_true", help="print each selected slide's script as phonemes, with voices and clicks, and exit (no video)")
@@ -374,12 +380,15 @@ def plan_slide(s, build_hold):
 # ---------------------------------------------------------------- tools
 
 IS_WINDOWS = os.name == "nt"
+IS_MAC = sys.platform == "darwin"
 INSTALL_HINT = {
     "ffmpeg": ("winget install Gyan.FFmpeg  (then open a new terminal)" if IS_WINDOWS
+               else "brew install ffmpeg" if IS_MAC
                else "sudo apt-get install ffmpeg"),
     "soffice": ("Microsoft PowerPoint or LibreOffice is needed to draw the slides. Run install-dependencies.cmd "
                 "in the Deck Narrator folder for a minimal LibreOffice that leaves Office's file types alone, or get "
                 "it from https://www.libreoffice.org/download/" if IS_WINDOWS
+                else "brew install --cask libreoffice" if IS_MAC
                 else "sudo apt-get install libreoffice-impress"),
 }
 
@@ -411,6 +420,9 @@ def find_soffice():
                 candidates += [str(Path(root) / "LibreOffice" / "program" / n) for n in ("soffice.com", "soffice.exe")]
     else:
         candidates += [shutil.which("soffice"), shutil.which("libreoffice")]
+        if IS_MAC:
+            candidates += [str(Path(root) / "LibreOffice.app" / "Contents" / "MacOS" / "soffice")
+                           for root in ("/Applications", Path.home() / "Applications")]
     for c in candidates:
         if c and Path(c).exists():
             return c
@@ -716,12 +728,19 @@ def available_voices():
     return sorted(v for v in names if re.fullmatch(r"[a-z][fm]_[a-z0-9_]+", v))
 
 
+def mps_available(torch):
+    """Apple Silicon's GPU (Metal), as torch sees it."""
+    return getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available()
+
+
 def resolve_device(choice):
     import torch
     if choice == "cuda" and not torch.cuda.is_available():
         raise Fail("--device cuda requested but CUDA is not available to torch")
+    if choice == "mps" and not mps_available(torch):
+        raise Fail("--device mps requested but Apple's Metal GPU is not available to torch")
     if choice == "auto":
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        return "cuda" if torch.cuda.is_available() else "mps" if mps_available(torch) else "cpu"
     return choice
 
 

@@ -779,7 +779,7 @@ class App:
         ttk.Label(engine, text="auto = PowerPoint if installed", style="Hint.TLabel").grid(row=0, column=2, sticky="w", **pad)
         ttk.Label(engine, text="Run voice on").grid(row=1, column=0, sticky="w", **pad)
         ttk.Combobox(engine, textvariable=self.v["device"], state="readonly", width=12,
-                     values=["auto", "cuda", "cpu"]).grid(row=1, column=1, sticky="w", **pad)
+                     values=["auto", "cuda", "mps", "cpu"]).grid(row=1, column=1, sticky="w", **pad)
         ttk.Label(engine, text="auto = NVIDIA GPU if there is one", style="Hint.TLabel").grid(row=1, column=2, sticky="w", **pad)
 
         upd = section(3, "Updates")
