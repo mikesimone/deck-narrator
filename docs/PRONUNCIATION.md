@@ -167,6 +167,12 @@ syllable is stressed, so they can't fix "present"; that takes phonemes.
 is generated. It's the right fix for something that's wrong everywhere: acronyms, product
 names, your own name.
 
+Common tech terms the voice gets wrong are fixed for you already, in every deck: AI ("ay
+eye"), API, APIs, AWS, JSON ("jay-son"), SAML, LDAP ("el-dap"), SOC ("sock"), CISO, OWASP,
+DoS, SASE ("sassy"), CASB, FIPS, PaaS, PoC, 2FA, IPv4, IPv6, PostgreSQL and OPSWAT. A rule
+for the same word in your file replaces the built-in one (for example
+`AI=artificial intelligence`). The list is `BUILTIN_PRONUNCIATIONS` in `narrate.py`.
+
 ```
 # Lines starting with # are comments. Blank lines are ignored.
 NGINX=engine x
@@ -352,7 +358,8 @@ What happens to a slide's notes, step by step (see `read_deck`, `clean_notes`,
 4. In each part, stage directions are removed: any other `[...]` **not** directly followed
    by `(`.
 5. Whitespace is collapsed; spaces left before punctuation are removed.
-6. The pronunciation file is applied (whole word, case-sensitive, longest first).
+6. The built-in fixes and then the pronunciation file are applied (whole word,
+   case-sensitive, longest first; the file's rule wins for a word in both).
 7. Neighbouring parts on the same build state with the same voice are joined.
 8. Each part is split into sentences, packed into chunks of 350 characters or fewer.
 9. Each chunk goes through misaki for that part's voice (honoring inline overrides), then Kokoro.
