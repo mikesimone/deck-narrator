@@ -55,7 +55,7 @@ gexe = EXE(gpyz, g.scripts, [], exclude_binaries=True, name="deck-narrator-gui",
 if not MAC:
     coll = COLLECT(exe, a.binaries, a.datas, gexe, g.binaries, g.datas, name="deck-narrator")
 else:
-    # The GUI first: the app bundle launches the first program it holds.
+    # CI sets the app's CFBundleExecutable to the GUI after the build.
     coll = COLLECT(gexe, g.binaries, g.datas, exe, a.binaries, a.datas, name="deck-narrator")
     app = BUNDLE(
         coll,
