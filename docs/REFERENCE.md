@@ -326,4 +326,7 @@ only for these, and nothing else:
   `install-dependencies.cmd` (or press **Install LibreOffice**, or tick the installer's
   checkbox) on a PC without PowerPoint or LibreOffice, to download LibreOffice.
 
+The **Buy me a coffee** button in **Settings** opens ko-fi.com in your browser, only when
+you click it.
+
 Those services' own privacy policies apply to those downloads.

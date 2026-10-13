@@ -48,6 +48,12 @@ puts each `[click]` where an animation happens, and respells names the voice wou
 - **[Reference](docs/REFERENCE.md):** the command line, every option, and the technical details.
 - **Something not working?** [Open an issue](https://github.com/mikesimone/deck-narrator/issues).
 
+## Tip jar
+
+Deck Narrator is free. If it saves you time, a tip keeps it going:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z3K2C2E)
+
 ## Privacy
 
 Your decks, notes and videos never leave your computer, and Deck Narrator collects nothing
