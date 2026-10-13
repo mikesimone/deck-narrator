@@ -33,7 +33,7 @@ back to the [README](../README.md). Pronunciation has its own page:
   ignoring animations, keeping temp files, saving to a Desktop folder, which dictionary
   file to use (**Import...**, **New...**, **Edit**, or **Use my own**), PowerPoint or
   LibreOffice for drawing slides, CPU or GPU, and the startup checks for new voices and for
-  Deck Narrator updates (each with **Check now**).
+  Deck Narrator updates (each with **Check now**), and a **Buy me a coffee** tip-jar link.
 - **Log** tab: the full output of the last run. It comes forward when something runs.
 - **Make video**, **Check builds** (the `--show-builds` report) and **Check pronunciation**
   (see below) sit under the tabs, with the progress bar; **Cancel** stops a

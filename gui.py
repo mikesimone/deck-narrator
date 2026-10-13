@@ -250,6 +250,7 @@ def refresh_path():
 
 RELEASES_API = "https://api.github.com/repos/mikesimone/deck-narrator/releases/latest"
 RELEASES_PAGE = "https://github.com/mikesimone/deck-narrator/releases/latest"
+TIP_JAR = "https://ko-fi.com/gcbapps"
 
 
 def version_tuple(v):
@@ -798,10 +799,19 @@ class App:
             row=1, column=0, sticky="w", **pad)
         ttk.Button(upd, text="Check now", command=lambda: self.check_updates(force=True)).grid(row=1, column=1, **pad)
 
-        ttk.Button(outer, text="Close", style="Accent.TButton", command=self.close_settings).grid(row=4, column=0, sticky="e")
+        bottom = ttk.Frame(outer)
+        bottom.grid(row=4, column=0, sticky="ew")
+        ttk.Button(bottom, text="Buy me a coffee", command=self.open_tip_jar).pack(side="left")
+        ttk.Label(bottom, text="Deck Narrator is free. If it saves you time, a tip keeps it going.",
+                  style="Hint.TLabel").pack(side="left", padx=8)
+        ttk.Button(bottom, text="Close", style="Accent.TButton", command=self.close_settings).pack(side="right")
         w.protocol("WM_DELETE_WINDOW", self.close_settings)
         self.root.update_idletasks()
         w.geometry(f"+{self.root.winfo_rootx() + 40}+{max(0, self.root.winfo_rooty() - 10)}")
+
+    def open_tip_jar(self):
+        import webbrowser
+        webbrowser.open(TIP_JAR)
 
     def close_settings(self):
         self.save_settings()
