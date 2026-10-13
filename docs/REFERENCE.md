@@ -235,7 +235,7 @@ copy with HuggingFace switched off (so everything must come from the installer),
 screenshots of the GUI, and uninstalls it, checking that the files, Start menu entry and
 PATH entry are gone. On Linux it also opens the GUI on a virtual display.
 
-1. **Unit tests** (75, no GPU, a few seconds). On their own:
+1. **Unit tests** (84, no GPU, a few seconds). On their own:
    `.venv/bin/python -m unittest discover -s test -v`
    - `test/test_text.py`: stage-direction stripping, keeping overrides, the
      detached-override check, pronunciation-file rules (whole word, case, longest first,

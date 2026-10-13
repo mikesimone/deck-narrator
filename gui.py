@@ -348,6 +348,16 @@ class Job:
 UNOVERRIDE = re.compile(r"\[([^\[\]]*)\]\([^)]*\)")    # [word](/phonemes/) -> word, for showing a sentence
 
 
+def same_word(issues, word, kinds):
+    """The rows a dictionary entry for `word` settles: every issue of one of `kinds` whose word
+    is `word` in any capitalization (Zscaler, zscaler, ZSCALER), and the distinct spellings
+    among them, `word` first. The dictionary matches case-sensitively, so each spelling gets
+    its own rule."""
+    rows = [i for i, x in enumerate(issues) if x["kind"] in kinds and x["word"].lower() == word.lower()]
+    spellings = [word] + sorted({issues[i]["word"] for i in rows} - {word})
+    return rows, spellings
+
+
 class PronunciationReview:
     """The Check pronunciation window: the words that may be said wrong, each way of saying
     one with a Play button, and Use this. For a word the dictionary doesn't know (or spells
@@ -373,10 +383,8 @@ class PronunciationReview:
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(1, weight=1)
-        ttk.Label(outer, text=f"{len(issues)} word(s) that may be said wrong in {Path(deck).name}. Pick one and "
-                              "press Play to hear each way. Use this saves a new word in your dictionary (every "
-                              "deck), or a word with two meanings in this deck's notes.",
-                  wraplength=640, justify="left").grid(row=0, column=0, sticky="w", pady=(0, 6))
+        self.header = ttk.Label(outer, wraplength=640, justify="left")
+        self.header.grid(row=0, column=0, sticky="w", pady=(0, 6))
         frame = ttk.Frame(outer)
         frame.grid(row=1, column=0, sticky="nsew")
         frame.columnconfigure(0, weight=1)
@@ -391,6 +399,8 @@ class PronunciationReview:
             self.tree.insert("", "end", iid=str(i), values=(issue["slide"], issue["word"],
                                                             self.KINDS.get(issue["kind"], issue["kind"]),
                                                             f"now /{issue['current']}/"))
+        self.tree.tag_configure("done", foreground=c["muted"])
+        self.update_header()
         sb = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.grid(row=0, column=0, sticky="nsew")
@@ -400,7 +410,7 @@ class PronunciationReview:
         self.detail = ttk.LabelFrame(outer, text="Choose how it's said", padding=(8, 4, 8, 6))
         self.detail.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         self.detail.columnconfigure(1, weight=1)
-        self.status = ttk.Label(outer, text="", style="Hint.TLabel")
+        self.status = ttk.Label(outer, text="", style="Hint.TLabel", wraplength=680, justify="left")
         self.status.grid(row=3, column=0, sticky="w", pady=(6, 0))
         btns = ttk.Frame(outer)
         btns.grid(row=4, column=0, sticky="e", pady=(6, 0))
@@ -413,6 +423,24 @@ class PronunciationReview:
         else:
             ttk.Label(self.detail, text="Nothing to check: every word has one clear pronunciation.").grid(
                 row=0, column=0, sticky="w")
+
+    def update_header(self):
+        left = sum(1 for r in self.tree.get_children() if "done" not in self.tree.item(r, "tags"))
+        self.header.configure(text=f"{left} of {len(self.issues)} word(s) still to check in {Path(self.deck).name}. "
+                                   "Pick one and press Play to hear each way. Use this saves a new word in your "
+                                   "dictionary (every deck, and every other place it's listed here), or a word "
+                                   "with two meanings in this deck's notes.")
+
+    def mark_done(self, iid, status):
+        self.tree.set(iid, "status", "\u2713 " + status)
+        self.tree.item(iid, tags=("done",))
+
+    def next_open(self):
+        nxt = next((r for r in self.tree.get_children() if "done" not in self.tree.item(r, "tags")), None)
+        if nxt:
+            self.tree.selection_set(nxt)
+            self.tree.see(nxt)
+        self.update_header()
 
     def show(self):
         for child in self.detail.winfo_children():
@@ -487,36 +515,40 @@ class PronunciationReview:
             return
 
         def done(out):
-            self.tree.set(iid, "status", f"fixed: /{phonemes}/")
+            self.mark_done(iid, f"fixed: /{phonemes}/")
             self.status.configure(text=f"Saved in slide {issue['slide']}'s notes. The original deck is kept as "
                                        f"\"{Path(self.deck).stem} (before deck-narrator).pptx\".")
-            nxt = self.tree.next(iid)
-            if nxt:
-                self.tree.selection_set(nxt)
-                self.tree.see(nxt)
+            self.next_open()
         self.run([self.deck, "--fix-word", str(issue["slide"]), issue["word"], str(issue["n"]), phonemes],
                  done, "Saving the deck...")
 
     def add_to_dictionary(self, issue, phonemes):
+        """Saves the word, and any other capitalization of it listed here, then marks every
+        listed instance of it done."""
         path = self.app.v["pronunciations"].get().strip() or str(narrate.default_dictionary())
+        word = issue["word"]
+        rows, spellings = same_word(self.issues, word, self.TO_DICTIONARY)
+        todo = list(spellings)
 
-        def done(out):
-            word = issue["word"]
-            for iid in self.tree.get_children():
-                if self.issues[int(iid)]["word"] == word:
-                    self.tree.set(iid, "status", f"in dictionary: /{phonemes}/")
+        def saved(out):
+            todo.pop(0)
+            if todo:
+                save_next()
+                return
+            for i in rows:
+                self.mark_done(str(i), f"in dictionary: /{phonemes}/")
             self.app.v["pronunciations"].set(path)       # the dictionary in use, shown in Settings
             self.app.save_settings()
             self.app.show_dictionary()
-            self.status.configure(text=f"Saved {word} in your dictionary ({Path(path).name}): every deck "
-                                       "says it this way now.")
-            rows = self.tree.get_children()
-            nxt = next((r for r in rows if not self.tree.set(r, "status").startswith(("fixed", "in dictionary"))), None)
-            if nxt:
-                self.tree.selection_set(nxt)
-                self.tree.see(nxt)
-        self.run(["--pronunciations", path, "--add-word", issue["word"], phonemes], done,
-                 "Saving it in your dictionary...")
+            also = f" (and {', '.join(spellings[1:])})" if len(spellings) > 1 else ""
+            self.status.configure(text=f"Saved {word}{also} in your dictionary ({Path(path).name}), and marked "
+                                       f"all {len(rows)} place(s) it's listed done. Every deck says it this way now.")
+            self.next_open()
+
+        def save_next():
+            self.run(["--pronunciations", path, "--add-word", todo[0], phonemes], saved,
+                     f"Saving {todo[0]} in your dictionary...")
+        save_next()
 
     def custom(self, iid, issue, spelling, use):
         spelling = spelling.strip()

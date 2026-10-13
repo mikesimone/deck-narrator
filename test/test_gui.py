@@ -82,6 +82,27 @@ class BuildArgs(unittest.TestCase):
             self.assertEqual(gui.voice_from_label(gui.voice_label(v)), v)
 
 
+@unittest.skipIf(gui is None, "tkinter not available")
+class SameWord(unittest.TestCase):
+    """Use this on a new word settles every listed instance of it (issue #6)."""
+
+    def issues(self):
+        return [{"word": "Zscaler", "kind": "unknown"}, {"word": "OPSWAT", "kind": "spelled"},
+                {"word": "Zscaler", "kind": "unknown"}, {"word": "zscaler", "kind": "unknown"},
+                {"word": "present", "kind": "heteronym"}, {"word": "ZSCALER", "kind": "spelled"}]
+
+    def test_every_instance_and_capitalization(self):
+        rows, spellings = gui.same_word(self.issues(), "Zscaler", ("unknown", "spelled"))
+        self.assertEqual(rows, [0, 2, 3, 5])
+        self.assertEqual(spellings, ["Zscaler", "ZSCALER", "zscaler"])
+
+    def test_heteronyms_are_left_alone(self):
+        issues = self.issues() + [{"word": "Present", "kind": "unknown"}]
+        rows, spellings = gui.same_word(issues, "Present", ("unknown", "spelled"))
+        self.assertEqual(rows, [6])
+        self.assertEqual(spellings, ["Present"])
+
+
 class Updates(unittest.TestCase):
     def release(self, tag, digest="sha256:" + "ab" * 32):
         return {"tag_name": tag, "assets": [

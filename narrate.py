@@ -28,7 +28,7 @@ import builds as anim
 if sys.platform == "darwin":
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-VERSION = "1.2.5"
+VERSION = "1.2.6"
 SAMPLE_RATE = 24000          # Kokoro's native output rate
 FPS = 30
 WIDTH, HEIGHT = 1920, 1080
