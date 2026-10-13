@@ -90,6 +90,7 @@ jobs:
           .venv/bin/python packaging/prerender_samples.py "$R/samples"
           .venv/bin/python packaging/fetch_model.py "$R/model"
           cp README.md LICENSE THIRD-PARTY-NOTICES.md "$R/"
+          cp -R docs "$R/docs"
           cp -R packaging/licenses "$R/licenses"
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict "$APP"
@@ -162,6 +163,7 @@ jobs:
           uv pip install --python .venv\Scripts\python.exe pyinstaller
           .\.venv\Scripts\pyinstaller.exe --noconfirm packaging\deck-narrator.spec
           Copy-Item README.md, LICENSE, THIRD-PARTY-NOTICES.md dist\deck-narrator\
+          Copy-Item -Recurse docs dist\deck-narrator\docs
           Copy-Item packaging\WINDOWS-STANDALONE.txt dist\deck-narrator\README-FIRST.txt
           Copy-Item -Recurse packaging\licenses dist\deck-narrator\licenses
           Copy-Item packaging\install-dependencies.ps1, packaging\install-dependencies.cmd dist\deck-narrator\
