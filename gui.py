@@ -29,6 +29,7 @@ from tkinter.scrolledtext import ScrolledText
 import narrate
 
 IS_WINDOWS = os.name == "nt"
+IS_MAC = sys.platform == "darwin"
 HERE = Path(__file__).resolve().parent
 FROZEN = getattr(sys, "frozen", False)
 TITLE = "Deck Narrator"
@@ -71,11 +72,15 @@ PALETTES = {
 
 
 def system_prefers_dark():
-    """Windows: the "app mode" in Settings > Personalization > Colors. Elsewhere: dark,
+    """Windows: the "app mode" in Settings > Personalization > Colors. Mac: System Settings >
+    Appearance. Elsewhere: dark,
     the brand's default. DECK_NARRATOR_THEME=light or dark overrides both."""
     forced = os.environ.get("DECK_NARRATOR_THEME", "").lower()
     if forced in ("light", "dark"):
         return forced == "dark"
+    if IS_MAC:   # System Settings > Appearance; the key only exists in Dark mode
+        r = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"], capture_output=True, text=True)
+        return r.stdout.strip() == "Dark"
     if not IS_WINDOWS:
         return True
     try:
@@ -97,7 +102,7 @@ def apply_theme(root, dark):
         f = tkfont.nametofont(name)
         if IS_WINDOWS:
             f.configure(family="Segoe UI")
-        f.configure(size=10)
+        f.configure(size=13 if IS_MAC else 10)   # Tk on a Mac counts in pixels-ish points
     base = tkfont.nametofont("TkDefaultFont")
     bold = base.copy()
     bold.configure(weight="bold")
@@ -277,6 +282,8 @@ def open_path(path):
     """Open a file or folder with the system's default app."""
     if IS_WINDOWS:
         os.startfile(path)  # noqa: S606 (a path the user chose or the tool wrote)
+    elif IS_MAC:
+        subprocess.Popen(["open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -286,13 +293,13 @@ def play_wav(path):
         import winsound
         winsound.PlaySound(str(path), winsound.SND_FILENAME | winsound.SND_ASYNC)
         return
-    for player in (["aplay", "-q"], ["paplay"], ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"]):
+    for player in (["afplay"], ["aplay", "-q"], ["paplay"], ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"]):
         try:
             subprocess.Popen(player + [str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return
         except FileNotFoundError:
             continue
-    raise OSError("no audio player found (aplay, paplay or ffplay)")
+    raise OSError("no audio player found (afplay, aplay, paplay or ffplay)")
 
 
 class Job:
@@ -1112,7 +1119,7 @@ class App:
             narrate.find_ffmpeg()
         except narrate.Fail:
             missing.append("ffmpeg")
-        if not narrate.powerpoint_installed():
+        if not (narrate.powerpoint_installed() or narrate.keynote_installed()):
             try:
                 narrate.find_soffice()
             except narrate.Fail:
@@ -1125,6 +1132,11 @@ class App:
                    "Install LibreOffice installs a minimal copy that leaves Office's file types alone."
                    if missing == ["LibreOffice"] else
                    f"Missing: {' and '.join(missing)}. Reinstall Deck Narrator, or set DECK_NARRATOR_FFMPEG.")
+        elif IS_MAC:
+            how = ("Deck Narrator draws slides with Keynote, which isn't on this Mac. Get it free from the "
+                   "App Store, then click Check again."
+                   if missing == ["LibreOffice"] else
+                   f"Missing: {' and '.join(missing)}. Download Deck Narrator again and copy it to Applications.")
         else:
             how = (f"Missing: {' and '.join(missing)} (LibreOffice draws the slides, ffmpeg makes the MP4). "
                    "Install them:  sudo apt install libreoffice-impress ffmpeg")
