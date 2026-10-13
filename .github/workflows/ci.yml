@@ -1,4 +1,4 @@
-# Tests on Linux and Windows on every push. The Windows job also builds the standalone
+# Tests on Linux, macOS and Windows on every push. The Windows job also builds the standalone
 # zip (PyInstaller, CPU torch) and tests the built .exe with the same suite, then builds
 # the MSI installer (WiX, with the voice model bundled), installs it, runs the suite and
 # the GUI against the installed copy with HuggingFace switched off, and uninstalls it.
@@ -37,6 +37,26 @@ jobs:
         run: |
           sudo apt-get install -y --no-install-recommends xvfb
           xvfb-run -a .venv/bin/python gui.py --selftest builds test/anim-deck.pptx "$RUNNER_TEMP/gui.txt" 0
+          cat "$RUNNER_TEMP/gui.txt"
+
+  # Apple Silicon. From source for now (Homebrew ffmpeg and LibreOffice); the runners
+  # have no Metal GPU, so the suite runs on the CPU.
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-kokoro-82m-v1-mac
+      - name: Setup (setup.sh)
+        run: ./setup.sh
+      - name: Test suite
+        run: test/verify.sh --device cpu
+      - name: GUI smoke test
+        run: |
+          .venv/bin/python gui.py --selftest builds test/anim-deck.pptx "$RUNNER_TEMP/gui.txt" 0
           cat "$RUNNER_TEMP/gui.txt"
 
   windows:
