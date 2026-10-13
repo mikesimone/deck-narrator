@@ -57,26 +57,33 @@ jobs:
             t open "x-apple.systempreferences:com.apple.preference.security"
           shot 3-privacy-security 8
           # Scroll the right-hand pane to the bottom, where "Open Anyway" is.
-          cat > scroll.applescript <<'OSA'
-          tell application "System Events" to tell process "System Settings"
-            repeat with e in (entire contents of window 1)
-              try
-                if class of e is scroll bar and orientation of e is "AXVerticalOrientation" then set value of e to 1.0
-              end try
+          # Try 1: move keyboard focus into the pane, then End / Page Down.
+          t osascript -e 'tell application "System Events" to tell process "System Settings"
+            key code 48
+            delay 0.5
+            key code 119
+            repeat 8 times
+              key code 121
             end repeat
-            set names to {}
-            repeat with e in (entire contents of window 1)
-              try
-                if class of e is button then set end of names to (name of e as text)
-              end try
-            end repeat
-            return names
-          end tell
-          OSA
-          t osascript scroll.applescript || true
-          shot 4-open-anyway 4
+          end tell' || true
+          shot 4a-keys 3
+          # Try 2: real mouse-wheel events over the pane.
+          cat > scroll.swift <<'SW'
+          import CoreGraphics
+          import Foundation
+          let p = CGPoint(x: 620, y: 450)
+          CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+          usleep(200000)
+          for _ in 0..<60 {
+            CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: -10, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+            usleep(30000)
+          }
+          SW
+          perl -e 'alarm shift; exec @ARGV' 150 swift scroll.swift || true
+          shot 4b-wheel 3
           t osascript -e 'quit app "System Settings"' || true
-          # The app itself, once allowed.
+          # The app itself, once allowed (close the disk-image window so it isn't in front).
+          t osascript -e 'tell application "Finder" to close every window' || true
           xattr -dr com.apple.quarantine "/Applications/Deck Narrator.app"
           t open "/Applications/Deck Narrator.app" || true
           shot 5-app 20
