@@ -1,0 +1,67 @@
+# Screenshots for docs/MAC.md: what a person sees installing the Mac app for the first
+# time. Run by hand with the id of a ci run whose macos job built the .dmg. The pictures
+# come back as the "mac-screenshots" artifact; good ones are copied into docs/images/mac/.
+name: mac-screenshots
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "ci run id whose deck-narrator-mac artifact (the .dmg) to use"
+        required: true
+      runner:
+        description: "macOS runner image"
+        default: macos-15
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  shots:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: deck-narrator-mac
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Take screenshots
+        continue-on-error: true
+        run: |
+          set -x
+          mkdir -p shots
+          shot() { sleep "${2:-6}"; screencapture -x "shots/$1.png" || true; }
+          sw_vers
+          spctl --status || true
+          # Turn Gatekeeper on, as on a normal Mac (CI images may have it off).
+          sudo spctl --global-enable 2>/dev/null || sudo spctl --master-enable 2>/dev/null || true
+          spctl --status || true
+          dmg=$(ls deck-narrator-*-mac-arm64.dmg)
+          # Mark it as downloaded from the web, the way Safari or Chrome would.
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "$dmg"
+          open "$dmg"
+          shot 1-disk-image 10
+          cp -R "/Volumes/Deck Narrator/Deck Narrator.app" /Applications/
+          xattr -w com.apple.quarantine "0083;$(printf %x "$(date +%s)");Safari;" "/Applications/Deck Narrator.app"
+          open "/Applications/Deck Narrator.app" || true
+          shot 2-first-open 10
+          osascript -e 'tell application "System Events" to key code 53' || true   # Esc closes the warning
+          open "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension" || \
+            open "x-apple.systempreferences:com.apple.preference.security"
+          shot 3-privacy-security 8
+          # Scroll to the bottom, where "Open Anyway" is.
+          osascript -e 'tell application "System Events" to tell process "System Settings" to key code 119' || true
+          shot 4-open-anyway 4
+          osascript -e 'quit app "System Settings"' || true
+          # The app itself, once allowed.
+          xattr -dr com.apple.quarantine "/Applications/Deck Narrator.app"
+          open "/Applications/Deck Narrator.app"
+          shot 5-app 20
+          ls -l shots
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-screenshots
+          path: shots
+          if-no-files-found: warn
+          retention-days: 14
