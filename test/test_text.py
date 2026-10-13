@@ -81,6 +81,15 @@ class Pronunciations(unittest.TestCase):
         r = rules_from("Kubernetes=[Kubernetes](/kˌubəɹnˈɛtiz/)\n")
         self.assertEqual(narrate.apply_pronunciations("Kubernetes!", r), "[Kubernetes](/kˌubəɹnˈɛtiz/)!")
 
+    def test_built_in_ai_and_your_rule_wins(self):
+        builtin = narrate.BUILTIN_PRONUNCIATIONS
+        out = narrate.apply_pronunciations("AI, AI's and AI-driven, not ai or GenAI", builtin)
+        self.assertEqual(out.count("[AI](/"), 3)
+        self.assertIn("not ai or GenAI", out)
+        mine = builtin + rules_from("AI=artificial intelligence\n")
+        self.assertEqual(narrate.apply_pronunciations("AI", mine), "artificial intelligence")
+        self.assertEqual(narrate.apply_pronunciations("[AI](/x/)", builtin), "[AI](/x/)")
+
     def test_comments_and_blanks(self):
         self.assertEqual(rules_from("# hi\n\n  # indented\nX=y\n"), [("X", "y")])
 

@@ -222,6 +222,35 @@ DICT_TEMPLATE = """\
 """
 
 
+# Words the voice gets wrong out of the box, fixed for every deck. A rule for the same word
+# in your dictionary wins, and so does an inline [word](/phonemes/) in the notes.
+# Each was checked with the real voices: rendered both ways and transcribed by a speech
+# recognizer (.github/workflows/pronounce-ab.yml).
+BUILTIN_PRONUNCIATIONS = [
+    ("AI", "[AI](/ˌAˈI/)"),                               # "ay eye", not "A <pause> I" or "aye"
+    ("API", "[API](/ˌApˈiˈI/)"),                          # "ay pee eye", not "apey eye"
+    ("APIs", "[APIs](/ˌApˈiˈIz/)"),
+    ("IPv4", "[IPv4](/ˌIpˌivˈi fˈɔɹ/)"),                  # not "ipv four"
+    ("IPv6", "[IPv6](/ˌIpˌivˈi sˈɪks/)"),
+    ("2FA", "[2FA](/tˈu ˌɛfˈA/)"),                        # not "too far"
+    ("JSON", "[JSON](/ʤˈAsᵊn/)"),                         # "jay-son", not spelled out
+    ("SAML", "[SAML](/sˈæməl/)"),                         # "sam-el"
+    ("LDAP", "[LDAP](/ˈɛldˌæp/)"),                        # "el-dap"
+    ("SOC", "[SOC](/sˈɑk/)"),                             # "sock", not "soash"
+    ("CISO", "[CISO](/sˈisO/)"),                          # "see-so"
+    ("OWASP", "[OWASP](/ˈOwˌɑsp/)"),                      # "oh-wasp"
+    ("DoS", "[DoS](/dˈɔs/)"),                             # "doss", not "doo-ess"
+    ("SASE", "[SASE](/sˈæsi/)"),                          # "sassy"
+    ("CASB", "[CASB](/kˈæzbˌi/)"),                        # "kaz-bee"
+    ("FIPS", "[FIPS](/fˈɪps/)"),
+    ("PaaS", "[PaaS](/pˈæs/)"),                           # "pass"
+    ("PoC", "[PoC](/pˌiˌOsˈi/)"),                         # "P O C", not "posy"
+    ("AWS", "[AWS](/ˌAdˌʌbᵊljuˈɛs/)"),                    # "A W S", not "awes"
+    ("PostgreSQL", "[PostgreSQL](/pˈOstɡɹɛs kjˌuˈɛl/)"),  # "postgres Q L"
+    ("OPSWAT", "[OPSWAT](/ˈɑpswˌɑt/)"),                   # "op swat", not spelled out
+]
+
+
 def default_dictionary():
     """The personal dictionary: used when --pronunciations isn't given and the file exists,
     and where --add-word (and the GUI's Use this) saves words. DECK_NARRATOR_DICTIONARY
@@ -239,6 +268,12 @@ def dictionary_for(args):
         return Path(args.pronunciations)
     d = default_dictionary()
     return d if d.is_file() else None
+
+
+def rules_for(args):
+    """The dictionary a run uses (or None) and its rules, after the built-in ones."""
+    dictionary = dictionary_for(args)
+    return dictionary, BUILTIN_PRONUNCIATIONS + (load_pronunciations(dictionary) if dictionary else [])
 
 
 def add_word(path, word, phonemes):
@@ -1309,8 +1344,7 @@ def speak_sample(args):
         raise Fail(f"--sample writes a WAV file; give -o a .wav path, not {out.name}")
     if args.speed <= 0:
         raise Fail("--speed must be > 0")
-    dictionary = dictionary_for(args)
-    rules = load_pronunciations(dictionary) if dictionary else []
+    _, rules = rules_for(args)
     text = apply_pronunciations(clean_notes(args.sample), rules)
     if not text:
         raise Fail("--sample text is empty")
@@ -1375,10 +1409,9 @@ def main(argv=None):
         return fix_word(deck_path, int(slide_no), word, int(n), phonemes)
     report_only = args.show_builds or args.show_phonemes or args.check_pronunciation
     out_path = None if report_only else resolve_output(deck_path, args.output)
-    dictionary = dictionary_for(args)
-    rules = load_pronunciations(dictionary) if dictionary else []
+    dictionary, rules = rules_for(args)
     if dictionary and not args.pronunciations:
-        log(f"Dictionary: {dictionary} ({len(rules)} words)")
+        log(f"Dictionary: {dictionary} ({len(rules) - len(BUILTIN_PRONUNCIATIONS)} words)")
 
     # Fail fast on missing binaries before any slow work.
     if not report_only:
