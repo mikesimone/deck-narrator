@@ -64,6 +64,11 @@ system PATH. The voice model, all its voices and ffmpeg are included (the MSI is
 because of them), so nothing is downloaded when you first make a video. Uninstall from
 Settings > Apps.
 
+**Mac (Apple Silicon).** Download `deck-narrator-<version>-mac-arm64.dmg` from the
+[Releases](../../releases) page, starting with the release after 1.2.5. The app isn't
+registered with Apple, so the first open needs one extra click in System Settings.
+**[Step-by-step Mac guide with pictures](docs/MAC.md).** Slides are drawn with Keynote.
+
 **Drawing the slides** takes Microsoft PowerPoint or LibreOffice. If PowerPoint is installed,
 Deck Narrator uses it and nothing else is needed. If not, leave **Install LibreOffice if
 it's needed** ticked on the installer's last page (or press **Install LibreOffice** in the
