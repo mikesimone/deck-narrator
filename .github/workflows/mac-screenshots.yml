@@ -14,7 +14,7 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write   # the pictures are also pushed to the ci-screenshots branch
 
 jobs:
   shots:
@@ -62,6 +62,16 @@ jobs:
           t open "/Applications/Deck Narrator.app" || true
           shot 5-app 20
           ls -l shots
+      # Also on a throwaway branch, so they can be looked at without downloading the artifact.
+      - name: Push to the ci-screenshots branch
+        if: always()
+        run: |
+          [ -n "$(ls shots 2>/dev/null)" ] || exit 0
+          cd shots
+          git init -q -b ci-screenshots
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com add .
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -q -m "mac screenshots from run ${{ github.run_id }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-screenshots
       - uses: actions/upload-artifact@v4
         if: always()
         with:
