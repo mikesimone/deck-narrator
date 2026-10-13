@@ -116,7 +116,7 @@ def build_parser():
                    "(default: your personal dictionary, if you have one; see --add-word)")
     p.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default="auto",
                    help="where Kokoro runs (default: auto = NVIDIA cuda, else Apple Silicon mps, else cpu)")
-    p.add_argument("--renderer", choices=["auto", "powerpoint", "libreoffice"], default="auto",
+    p.add_argument("--renderer", choices=["auto", "powerpoint", "keynote", "libreoffice"], default="auto",
                    help="what draws the slides (default: auto = PowerPoint if it's installed, else LibreOffice)")
     p.add_argument("--show-phonemes", action="store_true", help="print each selected slide's script as phonemes, with voices and clicks, and exit (no video)")
     p.add_argument("--phonemes", metavar="TEXT", help="print the phonemes for TEXT and exit, e.g. --phonemes 'a present'")
@@ -441,15 +441,28 @@ def powerpoint_installed():
         return False
 
 
+def keynote_installed():
+    """True on a Mac with Apple's Keynote (free, and it opens .pptx)."""
+    return IS_MAC and any((Path(root) / "Keynote.app").is_dir()
+                          for root in ("/Applications", Path.home() / "Applications"))
+
+
 def choose_renderer(choice):
-    """--renderer -> "powerpoint" or "libreoffice", checking the one picked is there.
-    auto prefers PowerPoint: it draws a deck exactly as PowerPoint shows it, and on a PC
-    with Office it means LibreOffice isn't needed at all."""
+    """--renderer -> "powerpoint", "keynote" or "libreoffice", checking the one picked is there.
+    auto prefers PowerPoint on Windows: it draws a deck exactly as PowerPoint shows it, and on
+    a PC with Office it means LibreOffice isn't needed at all. On a Mac, auto prefers Keynote,
+    which every Mac can have for free."""
     choice = os.environ.get("DECK_NARRATOR_RENDERER") or choice
     if choice in ("auto", "powerpoint") and powerpoint_installed():
         return "powerpoint"
     if choice == "powerpoint":
-        raise Fail("--renderer powerpoint: Microsoft PowerPoint isn't installed on this PC")
+        raise Fail("--renderer powerpoint: Microsoft PowerPoint isn't installed on this PC "
+                   "(on a Mac, use Keynote)" if IS_MAC else
+                   "--renderer powerpoint: Microsoft PowerPoint isn't installed on this PC")
+    if choice in ("auto", "keynote") and keynote_installed():
+        return "keynote"
+    if choice == "keynote":
+        raise Fail("--renderer keynote: Keynote isn't installed (it's free in the Mac App Store)")
     find_soffice()
     return "libreoffice"
 
@@ -505,6 +518,42 @@ def export_powerpoint(deck_path, outdir, pages):
     return pngs
 
 
+# Exports a deck to PDF through Keynote, which opens .pptx itself. Hidden slides come in as
+# Keynote's skipped slides. Keynote is quit afterwards only if it wasn't already running.
+KEYNOTE_EXPORT = r"""
+on run argv
+    set deckFile to POSIX file (item 1 of argv)
+    set pdfFile to POSIX file (item 2 of argv)
+    set withSkipped to (item 3 of argv) is "1"
+    tell application "System Events" to set wasRunning to exists (processes where bundle identifier is "com.apple.iWork.Keynote")
+    tell application "Keynote"
+        set d to open deckFile
+        try
+            export d to pdfFile as PDF with properties {PDF image quality:Best, skipped slides:withSkipped}
+        on error msg number n
+            close d saving no
+            error msg number n
+        end try
+        close d saving no
+        if not wasRunning then quit
+    end tell
+end run
+"""
+
+
+def export_keynote(deck_path, outdir, include_hidden):
+    """The deck as a PDF drawn by Keynote; hidden slides are included only if asked."""
+    outdir.mkdir(parents=True, exist_ok=True)
+    script = outdir / "export.applescript"
+    script.write_text(KEYNOTE_EXPORT, encoding="utf-8")
+    pdf = outdir / (deck_path.stem + ".pdf")
+    run(["osascript", str(script), str(deck_path.resolve()), str(pdf.resolve()), "1" if include_hidden else "0"],
+        "Keynote export (if macOS asked whether Deck Narrator may control Keynote, allow it and try again)")
+    if not pdf.exists():
+        raise Fail(f"Keynote reported success but wrote no PDF at {pdf}")
+    return pdf
+
+
 def export_pdf(deck_path, outdir, profile, include_hidden):
     soffice = find_soffice()
     filt = json.dumps({"ExportHiddenSlides": {"type": "boolean", "value": "true" if include_hidden else "false"},
@@ -553,7 +602,7 @@ def render_states(deck_path, tmp, slides, selected, renderer="libreoffice"):
     """
     from pptx import Presentation
     profile = tmp / "lo-profile"
-    tool = "PowerPoint" if renderer == "powerpoint" else "LibreOffice"
+    tool = {"powerpoint": "PowerPoint", "keynote": "Keynote"}.get(renderer, "LibreOffice")
     n_passes = max(len(s["builds"].states) for s in selected)
     animated = [s for s in selected if len(s["builds"].states) > 1 or s["builds"].states[0]]
     out = {}
@@ -586,6 +635,8 @@ def render_states(deck_path, tmp, slides, selected, renderer="libreoffice"):
             log(f"Rendering build pass {v + 1}/{n_passes} with {tool}...")
         if renderer == "powerpoint":
             pngs = export_powerpoint(deck, tmp / f"ppt{v}", pages)
+        elif renderer == "keynote":
+            pngs = rasterize(export_keynote(deck, tmp / f"key{v}", include_hidden), tmp / f"p{v}", len(pages))
         else:
             pngs = rasterize(export_pdf(deck, tmp / f"pdf{v}", profile, include_hidden), tmp / f"p{v}", len(pages))
         for num, png in zip(pages, pngs):
