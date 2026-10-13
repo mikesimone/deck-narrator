@@ -20,8 +20,8 @@ Turns a PowerPoint deck's speaker notes into a voice-narrated MP4.
 
 This build runs the voice on the CPU (no GPU needed; a 4-minute deck renders in under
 a minute on an 8-core desktop CPU). For NVIDIA GPU speed, install from source instead:
-see README.md, "Windows from source".
+see docs\WINDOWS.md, "From source".
 
-Full documentation: README.md in this folder, or the project page on GitHub.
+Full documentation: README.md and the docs folder here, or the project page on GitHub.
 Licenses: LICENSE, THIRD-PARTY-NOTICES.md and licenses\GPL-3.0.txt (this bundle is
 distributed under GPL-3.0 terms because it includes GPL-3.0 components).

@@ -68,8 +68,10 @@ App Store, then click **Check again**.
 
 The video is saved next to your PowerPoint file, with the same name ending in `.mp4`.
 
-The [how-to video](../README.md) and the rest of the [README](../README.md) explain the
-other options: picking a voice, fixing words it says wrong, and slide animations.
+The [how-to video](../README.md) and [Using Deck Narrator](GUIDE.md) explain the other
+options: picking a voice, slide animations and more. For words it says wrong, see [Fixing
+pronunciation](PRONUNCIATION.md). For the best results, [let an AI write your
+notes](AI-NOTES.md).
 
 ## If something goes wrong
 

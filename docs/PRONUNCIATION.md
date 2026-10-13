@@ -4,6 +4,17 @@ The voice reads your speaker notes. When it says a word wrong, fix it in the not
 or in a pronunciation file. This guide covers both, how to tell what it will say
 before rendering, and the mistakes worth avoiding.
 
+**The easy way, before reading any further:**
+
+1. **Have an AI write the notes.** It spells out abbreviations and respells names the voice
+   would misread, and it hands you a list of those words for your dictionary.
+   [Let an AI write your notes](AI-NOTES.md) has a prompt to copy.
+2. **Click Check pronunciation** in Deck Narrator. It lists only the words that may come out
+   wrong. Pick one, **Play** each way of saying it, and click **Use this** on the right one.
+   If none is right, type a spelling that sounds right (`op swat`) under **Sounds like**.
+
+The rest of this page is for doing it by hand, and for the command line.
+
 Every phoneme string on this page was produced by the tool itself
 (`deck-narrator --phonemes ...`), not written by hand.
 
@@ -272,7 +283,7 @@ Because British uses plain `a`, phoneme output can look like an English word: un
 "and" comes out as `and`. That's the phonemes for "and", not a word that slipped through.
 
 In a deck that switches between an American and a British voice
-([README: Switching voices](../README.md#switching-voices)), an override inside a British
+([Switching voices](GUIDE.md#switching-voices)), an override inside a British
 part needs British phonemes, and `--show-phonemes` shows each part in its own voice's set.
 
 ## Common heteronyms
@@ -326,7 +337,7 @@ $ deck-narrator --phonemes "I [read](/ɹˈid/) books every day. Made of [lead](/
 | A keyboard `g` instead of IPA `ɡ` | That sound may come out wrong or be skipped | Copy phonemes from `--phonemes` |
 | A pronunciation-file line with no `=` | The tool stops: `file:line: expected word=replacement` | Fix or comment out the line |
 | `[pause]`, `[Slide 3]`, `[laughs]` | Removed from the spoken text, on purpose | That's what stage directions are for |
-| `[click]`, `[voice: ...]` | Never spoken: they advance a build or switch voice ([README](../README.md#animation-builds)) | |
+| `[click]`, `[voice: ...]` | Never spoken: they advance a build or switch voice ([Animation builds](GUIDE.md#animation-builds)) | |
 | An American override inside a British voice's part | The British voice is handed American phonemes for that word. No error, so look at `--show-phonemes` | Look up with `--voice bf_...` ([British voices](#british-voices)) |
 
 ## Order of operations
@@ -337,7 +348,7 @@ What happens to a slide's notes, step by step (see `read_deck`, `clean_notes`,
 1. Raw notes are read from the slide (hidden slides never get this far).
 2. **Check:** a detached override (`[word] (/.../)`) stops the run with the slide number.
 3. The notes are split at `[click]` and `[voice: name]` markers into parts, each with a
-   build step and a voice ([README](../README.md#animation-builds)).
+   build step and a voice ([Animation builds](GUIDE.md#animation-builds)).
 4. In each part, stage directions are removed: any other `[...]` **not** directly followed
    by `(`.
 5. Whitespace is collapsed; spaces left before punctuation are removed.
