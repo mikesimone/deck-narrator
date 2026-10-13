@@ -6,7 +6,7 @@
     wix extension add -g WixToolset.UI.wixext/5.0.2
     wix extension add -g WixToolset.Util.wixext/5.0.2
     wix build packaging\installer\DeckNarrator.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext
-        -d Version=1.2.5 -d AppDir=dist\deck-narrator -o deck-narrator.msi
+        -d Version=1.2.6 -d AppDir=dist\deck-narrator -o deck-narrator.msi
 
   Installs to Program Files\Deck Narrator for all users, adds a Start menu entry for the
   GUI and puts the folder on the system PATH (for deck-narrator.exe). Nothing on the

@@ -46,7 +46,8 @@ dictionary (so it guesses), and all-capitals names it would spell out letter by 
 **Use this** does depends on the word:
 
 - **A word the voice doesn't know, or spells out:** it's saved in your pronunciation
-  dictionary, so every deck says it that way from now on. Your dictionary is
+  dictionary, so every deck says it that way from now on, and every other place it's
+  listed (any slide, any capitalization) is ticked off too. Your dictionary is
   `%APPDATA%\deck-narrator\pronunciations.txt` (Linux: `~/.config/deck-narrator/pronunciations.txt`).
   The first word saved creates it, and from then on it's used automatically, by the window
   and the command line alike. To use a different file, pick it in **Settings**.
