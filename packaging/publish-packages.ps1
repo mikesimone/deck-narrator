@@ -79,8 +79,24 @@ if ($Submit) {
         & curl.exe -L --fail --retry 3 -s -o $wc "https://aka.ms/wingetcreate/latest"
         if ($LASTEXITCODE) { throw "couldn't download wingetcreate" }
         $env:WINGET_CREATE_GITHUB_TOKEN = $env:WINGET_TOKEN     # read from the environment, so it's never on a command line
-        & $wc submit --prtitle "New version: MikeSimone.DeckNarrator version $Version" "$out\winget"
+        $title = "New version: MikeSimone.DeckNarrator version $Version"
+        & $wc submit --prtitle $title "$out\winget"
         if ($LASTEXITCODE) { throw "wingetcreate submit failed: $LASTEXITCODE" }
+        # Sign the CLA on the new PR right away, so the policy bot doesn't park it as Needs-CLA.
+        try {
+            $gh = @{ Authorization = "Bearer $env:WINGET_TOKEN"; Accept = "application/vnd.github+json" }
+            $q = [uri]::EscapeDataString("repo:microsoft/winget-pkgs is:pr is:open in:title `"$title`"")
+            $pr = $null
+            foreach ($try in 1..6) {      # the search index can lag the new PR by a few seconds
+                $pr = (Invoke-RestMethod -Headers $gh "https://api.github.com/search/issues?q=$q").items | Select-Object -First 1
+                if ($pr) { break }
+                Start-Sleep 10
+            }
+            if (-not $pr) { throw "couldn't find the PR" }
+            Invoke-RestMethod -Method Post -Headers $gh -ContentType "application/json" -Uri "$($pr.url)/comments" `
+                -Body (@{ body = "@microsoft-github-policy-service agree" } | ConvertTo-Json) | Out-Null
+            Write-Host "winget: CLA agree posted on $($pr.html_url)"
+        } catch { Write-Warning "winget: PR opened, but posting the CLA agree comment failed: $_" }
     } else { Write-Host "winget: built, not submitted (no WINGET_TOKEN)" }
     if ($env:CHOCO_API_KEY) {
         & choco push $nupkg --source "https://push.chocolatey.org/" --api-key $env:CHOCO_API_KEY --limit-output
