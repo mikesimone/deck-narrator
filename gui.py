@@ -775,12 +775,13 @@ class App:
         engine = section(2, "Engine")
         ttk.Label(engine, text="Draw slides with").grid(row=0, column=0, sticky="w", **pad)
         ttk.Combobox(engine, textvariable=self.v["renderer"], state="readonly", width=12,
-                     values=["auto", "powerpoint", "libreoffice"]).grid(row=0, column=1, sticky="w", **pad)
-        ttk.Label(engine, text="auto = PowerPoint if installed", style="Hint.TLabel").grid(row=0, column=2, sticky="w", **pad)
+                     values=["auto", "powerpoint", "keynote", "libreoffice"]).grid(row=0, column=1, sticky="w", **pad)
+        ttk.Label(engine, text="auto = Keynote on a Mac, PowerPoint on Windows if installed",
+                  style="Hint.TLabel").grid(row=0, column=2, sticky="w", **pad)
         ttk.Label(engine, text="Run voice on").grid(row=1, column=0, sticky="w", **pad)
         ttk.Combobox(engine, textvariable=self.v["device"], state="readonly", width=12,
                      values=["auto", "cuda", "mps", "cpu"]).grid(row=1, column=1, sticky="w", **pad)
-        ttk.Label(engine, text="auto = NVIDIA GPU if there is one", style="Hint.TLabel").grid(row=1, column=2, sticky="w", **pad)
+        ttk.Label(engine, text="auto = NVIDIA GPU or Apple Silicon if there is one", style="Hint.TLabel").grid(row=1, column=2, sticky="w", **pad)
 
         upd = section(3, "Updates")
         ttk.Checkbutton(upd, text="Check for new voices at startup", variable=self.v["check_voices"]).grid(

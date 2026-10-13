@@ -426,7 +426,7 @@ does.
 | `--fix-word SLIDE WORD N PHONEMES` | | Write `[WORD](/PHONEMES/)` in place of the `N`th `WORD` in slide `SLIDE`'s notes and save the deck. The first time, the original is kept as `<deck> (before deck-narrator).pptx`. `N` counts every whole-word `WORD` in that slide's notes, fixed or not, case ignored |
 | `--sample TEXT` | | Speak `TEXT` into a WAV with `--voice`, `--speed` and `--pronunciations`, print its path and exit. `-o` names the `.wav` (default: `deck-narrator-sample.wav` in the temp folder). Doesn't need a deck. The GUI's **Play sample** uses this. Samples are saved (see [The GUI](#the-gui)), so the same one again is instant |
 | `--device auto\|cuda\|cpu` | `auto` | Where Kokoro runs. `auto` uses CUDA when torch can see a GPU |
-| `--renderer auto\|powerpoint\|libreoffice` | `auto` | What draws the slides. `auto` uses Microsoft PowerPoint when it's installed (Windows), else LibreOffice |
+| `--renderer auto\|powerpoint\|keynote\|libreoffice` | `auto` | What draws the slides. `auto` uses Microsoft PowerPoint when it's installed (Windows), Keynote on a Mac, else LibreOffice |
 | `--update-voices` | | Download voices that are new or updated on HuggingFace since the install, into a per-user folder, print one `voices: ...` line, and exit. Only for installs with bundled voices; others download voices on use anyway |
 | `--keep-temp` | off | Keep the temp dir (PNGs, PDF, WAV, `manifest.json`) and print its path |
 | `--version` | | Print the version and exit |
@@ -582,7 +582,7 @@ Environment variables, all optional:
 |---|---|
 | `DECK_NARRATOR_SOFFICE` | Full path to LibreOffice's `soffice` (`soffice.com` on Windows), if it isn't found automatically |
 | `DECK_NARRATOR_FFMPEG` | Full path to `ffmpeg`. Otherwise the bundled `ffmpeg\ffmpeg.exe` (Windows builds), else PATH |
-| `DECK_NARRATOR_RENDERER` | `powerpoint` or `libreoffice`, overriding `--renderer` |
+| `DECK_NARRATOR_RENDERER` | `powerpoint`, `keynote` or `libreoffice`, overriding `--renderer` |
 | `DECK_NARRATOR_VOICE_DIR` | Where `--update-voices` puts new and updated voices (default: the per-user folder above) |
 | `DECK_NARRATOR_SAMPLE_CACHE` | Where finished samples are saved (default: `%LOCALAPPDATA%\deck-narrator\samples`, or `~/.cache/deck-narrator/samples`) |
 | `DECK_NARRATOR_DICTIONARY` | Where your personal pronunciation dictionary is (default: `%APPDATA%\deck-narrator\pronunciations.txt`, or `~/.config/deck-narrator/pronunciations.txt`) |

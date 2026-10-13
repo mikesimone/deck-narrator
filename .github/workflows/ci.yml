@@ -44,6 +44,9 @@ jobs:
   macos:
     runs-on: macos-14
     timeout-minutes: 60
+    env:
+      # Keynote automation needs a person to allow it once, so CI draws with LibreOffice.
+      DECK_NARRATOR_RENDERER: libreoffice
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
