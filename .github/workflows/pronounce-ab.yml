@@ -1,0 +1,38 @@
+# Renders a few ways of saying a phrase with the real voice, so a pronunciation can be chosen
+# by measurement and by ear. Each "|"-separated line of `texts` becomes one WAV (af_heart and
+# am_michael). The report gives each clip's length, its longest pause inside the speech, and
+# what Whisper hears. WAVs and the report go to the throwaway ab-samples branch.
+name: pronounce-ab
+on:
+  workflow_dispatch:
+    inputs:
+      texts:
+        description: "Lines to say, separated by |"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  ab:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup
+        run: ./setup.sh
+      - name: Render and measure
+        env:
+          TEXTS: ${{ inputs.texts }}
+        run: |
+          uv pip install --python .venv/bin/python faster-whisper
+          mkdir -p ab
+          .venv/bin/python test/ab_samples.py ab
+          cat ab/report.txt
+      - name: Push to the ab-samples branch
+        run: |
+          cd ab
+          git init -q -b ab-samples
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com add .
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -q -m "samples from run ${{ github.run_id }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ab-samples
