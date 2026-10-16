@@ -235,8 +235,12 @@ jobs:
           wix extension add -g WixToolset.UI.wixext/5.0.2
           wix extension add -g WixToolset.Util.wixext/5.0.2
           wix build packaging\installer\DeckNarrator.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
-            -d Version=$version -d AppDir="$PWD\dist\deck-narrator" -o deck-narrator-$version-x64.msi
-          if ($LASTEXITCODE) { throw "wix build failed" }
+            -d Version=$version -d AppDir="$PWD\dist\deck-narrator" -o deck-narrator-$version-x64.msi *>&1 | Tee-Object -FilePath wix.log
+          if ($LASTEXITCODE) {
+            $msg = ((Get-Content wix.log | Select-Object -Last 40) -join "%0A")
+            Write-Host "::error title=wix build::$msg"
+            throw "wix build failed"
+          }
           Get-Item deck-narrator-$version-x64.msi | Format-List Name, Length
       - name: Install MSI
         run: |
