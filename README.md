@@ -31,6 +31,9 @@ Pick your computer. Each link opens a short, step-by-step page.
 2. Open Deck Narrator, click **Browse...** and pick the deck.
 3. Click **Make video**. The video is saved next to the deck, with the same name.
 
+**Want it in your own voice?** Record about 20 seconds of yourself and add it as a voice. See
+[Your own voice](docs/OWN-VOICE.md).
+
 ## For the best results, let an AI write the notes
 
 **The best videos come from having an AI chatbot (ChatGPT, Claude, Copilot, Gemini) write
