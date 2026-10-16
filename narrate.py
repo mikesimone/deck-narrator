@@ -1168,7 +1168,9 @@ def install_own_voice():
         step(f"Making a Python {OWN_PYTHON} environment...", [uv, "venv", "--python", OWN_PYTHON, home / "venv"])
     backend = torch_backend()
     overrides = home / "overrides.txt"
-    overrides.write_text(f"torch=={CHATTERBOX_TORCH}\ntorchaudio=={CHATTERBOX_TORCH}\n", encoding="utf-8")
+    # setuptools 81+ dropped pkg_resources, which Chatterbox's watermarker (resemble-perth)
+    # imports; without it the model doesn't load.
+    overrides.write_text(f"torch=={CHATTERBOX_TORCH}\ntorchaudio=={CHATTERBOX_TORCH}\nsetuptools<81\n", encoding="utf-8")
     cmd = [uv, "pip", "install", "--python", own_python(), "--override", overrides, CHATTERBOX, "soundfile"]
     if backend:
         cmd[3:3] = ["--torch-backend", backend]

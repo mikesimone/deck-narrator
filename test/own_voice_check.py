@@ -25,6 +25,13 @@ REFERENCE = ("Good morning, everyone. Thanks for joining. Today I'll walk you th
 SAY = "Deck Narrator can speak in your own voice, slide by slide."
 
 
+def annotate(title, text):
+    """On GitHub Actions, put the failure in an annotation, readable without the full log."""
+    if os.environ.get("GITHUB_ACTIONS"):
+        msg = text[-4000:].replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+        print(f"::error title={title}::{msg}", flush=True)
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--exe", help="the built deck-narrator; default: narrate.py with this Python")
@@ -44,6 +51,7 @@ def main():
         print(f"  ({time.time() - t0:.0f}s, exit {r.returncode})", flush=True)
         if r.returncode:
             print(r.stdout)
+            annotate(f"own voice: {a[0]}", r.stderr + r.stdout)
             sys.exit(f"FAILED: {' '.join(str(x) for x in a)}")
         return r
 
@@ -90,4 +98,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (AssertionError, subprocess.TimeoutExpired) as e:
+        annotate("own voice check", f"{type(e).__name__}: {e}")
+        raise
