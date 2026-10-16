@@ -22,7 +22,7 @@
 
   When PowerPoint or LibreOffice is there (so the LibreOffice checkbox isn't needed), the
   same checkbox, unticked, offers to set up "your own voice" instead: it runs
-  own-voice-setup.cmd (deck-narrator.exe --install-own-voice) for the user who installed,
+  own-voice-setup.cmd (deck-narrator.exe with the install-own-voice option) for the user who installed,
   a 4 to 6 GB download. Settings > Set up in the app does the same at any time.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
