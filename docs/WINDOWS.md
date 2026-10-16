@@ -42,6 +42,9 @@ unknown publisher. Choose **More info**, then **Run anyway**. They're built from
 repository by GitHub Actions ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)), not
 on anyone's PC, and the Releases page lists each file's SHA-256.
 
+If PowerPoint or LibreOffice is already there, the last page offers **Set up your own voice
+now** instead (unticked): see [Your own voice](OWN-VOICE.md).
+
 A silent install: `msiexec /i deck-narrator-<version>-x64.msi /qn INSTALLDEPS=1`
 (`INSTALLDEPS=1` adds LibreOffice if it's needed; see the next section).
 

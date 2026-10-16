@@ -12,6 +12,7 @@ see [Using Deck Narrator](GUIDE.md).
 - [Output format and timing](#output-format-and-timing)
 - [What gets installed](#what-gets-installed)
 - [GPU or CPU](#gpu-or-cpu)
+- [Your own voice](#your-own-voice)
 - [Testing](#testing)
 - [Files in this repo](#files-in-this-repo)
 - [Privacy](#privacy)
@@ -85,6 +86,9 @@ Steps 1 and 2 take seconds and render nothing.
 | `--sample TEXT` | | Speak `TEXT` into a WAV with `--voice`, `--speed` and `--pronunciations`, print its path and exit. `-o` names the `.wav` (default: `deck-narrator-sample.wav` in the temp folder). Doesn't need a deck. The GUI's **Play sample** uses this. Samples are saved (see [The GUI](GUIDE.md#the-gui)), so the same one again is instant |
 | `--device auto\|cuda\|mps\|cpu` | `auto` | Where Kokoro runs. `auto` uses CUDA when torch can see an NVIDIA GPU, the Mac's GPU (`mps`) on Apple Silicon, else the CPU |
 | `--renderer auto\|powerpoint\|keynote\|libreoffice` | `auto` | What draws the slides. `auto` uses Microsoft PowerPoint when it's installed (Windows), Keynote on a Mac, else LibreOffice |
+| `--install-own-voice` | | Set up Chatterbox for [your own voice](OWN-VOICE.md) (4 to 6 GB, once; run again to repair), print `own-voice: ready`, and exit |
+| `--add-voice NAME FILE` | | Make your own voice `NAME` from `FILE`: a 10-30 second recording (`.wav`, `.flac`, `.mp3`, `.ogg`) or a [voice pack](OWN-VOICE.md#voice-packs) (`.zip` or folder). Replaces a voice of the same name. Prints `voice: NAME` and exits |
+| `--remove-voice NAME` | | Delete your own voice `NAME` and exit |
 | `--update-voices` | | Download voices that are new or updated on HuggingFace since the install, into a per-user folder, print one `voices: ...` line, and exit. Only for installs with bundled voices; others download voices on use anyway |
 | `--keep-temp` | off | Keep the temp dir (PNGs, PDF, WAV, `manifest.json`) and print its path |
 | `--version` | | Print the version and exit |
@@ -198,6 +202,9 @@ Environment variables, all optional:
 | `DECK_NARRATOR_DICTIONARY` | Where your personal pronunciation dictionary is (default: `%APPDATA%\deck-narrator\pronunciations.txt`, or `~/.config/deck-narrator/pronunciations.txt`) |
 | `DECK_NARRATOR_THEME` | `light` or `dark` for the GUI, instead of following Windows |
 | `DECK_NARRATOR_ALLOW_DESKTOP=1` | Allow writing into a Desktop folder |
+| `DECK_NARRATOR_OWN_VOICE_HOME` | Where Chatterbox's Python, model and installer go (default: `chatterbox` in the per-user data folder, `%LOCALAPPDATA%\deck-narrator` or `~/.local/share/deck-narrator`) |
+| `DECK_NARRATOR_MY_VOICES` | Where your own voices go (default: `my-voices` in the same data folder) |
+| `DECK_NARRATOR_TORCH_BACKEND` | Which PyTorch `--install-own-voice` installs (`cpu`, `cu128`, ...), instead of CUDA 12.8 when `nvidia-smi` finds a GPU, else CPU |
 | `DECK_NARRATOR_MODEL_DIR` | A folder holding `config.json`, `kokoro-v1_0.pth` and `voices/*.pt`, used instead of downloading. Without it, a `model/` folder next to the program is used if there is one (the Windows installer puts one there); otherwise the HuggingFace download and cache. `packaging/fetch_model.py DEST` makes such a folder |
 
 If a deck uses a font that isn't installed, LibreOffice substitutes another one without
@@ -217,6 +224,30 @@ leaves it alone.
 
 The Windows standalone zip is a CPU build, so it works on any machine; install from source
 for GPU speed.
+
+## Your own voice
+
+Optional, and set up separately (see [OWN-VOICE.md](OWN-VOICE.md) for the everyday side).
+Chatterbox needs a different PyTorch and transformers from Kokoro's, so it gets its own
+Python rather than sharing deck-narrator's:
+
+- `--install-own-voice` downloads [uv](https://github.com/astral-sh/uv) (a pinned release
+  from PyPI, checked against its SHA-256), which installs Python 3.11 and a virtual
+  environment with `chatterbox-tts` 0.1.7 and PyTorch 2.8 (CUDA 12.8 when `nvidia-smi` finds
+  an NVIDIA GPU, else CPU; the standard build on a Mac), then downloads Chatterbox's model
+  from HuggingFace (`ResembleAI/chatterbox`) into that folder. Nothing goes into
+  deck-narrator's own install.
+- A voice is a folder in `my-voices`: `reference.*`, plus `t3.safetensors` and `voice.json`
+  when it came from a voice pack. Names are `[a-z0-9][a-z0-9_-]{0,31}`, and can't look like
+  a Kokoro name (`af_...`) or be `default`.
+- During a run, `own_voice_worker.py` runs in that Python (offline, `HF_HUB_OFFLINE=1`) and
+  speaks each chunk of notes on request (one JSON line each way). `--device` applies to it
+  too. Each chunk is seeded from the voice and the text, so it comes out the same every
+  time; leading and trailing silence is trimmed, and its 24 kHz audio joins the rest like a
+  Kokoro voice's.
+- Phoneme overrides are read as the plain word, and `--speed` is ignored for these voices
+  (the log says so). `--show-phonemes` and `--phonemes` show the words instead.
+- It's much heavier than Kokoro: about 3 to 5 GB of VRAM on an NVIDIA GPU, and slow on a CPU.
 
 ## Testing
 
@@ -300,7 +331,9 @@ The test outputs (`test/*-deck.pptx`, `test/*-deck.mp4`) are gitignored.
 | `LICENSE`, `THIRD-PARTY-NOTICES.md` | MIT for this code; what the zip and installer bundle and under which licenses |
 | `docs/` | The guides: `WINDOWS.md`, `MAC.md` and `LINUX.md` (installing), `GUIDE.md` (using it), `PRONUNCIATION.md`, `AI-NOTES.md` (having an AI write the notes), this `REFERENCE.md`, and `release-notes/` |
 | `test/verify.py` (`verify.sh`) | Unit tests plus both end-to-end checks |
-| `test/test_text.py`, `test/test_builds.py`, `test/test_gui.py`, `test/test_model_dir.py`, `test/test_tools.py`, `test/test_pronunciation.py` | Unit tests |
+| `test/test_text.py`, `test/test_builds.py`, `test/test_gui.py`, `test/test_model_dir.py`, `test/test_tools.py`, `test/test_pronunciation.py`, `test/test_own_voice.py` | Unit tests |
+| `own_voice_worker.py` | Speaks in your own voice with Chatterbox, in Chatterbox's own Python (see [Your own voice](#your-own-voice)) |
+| `test/own_voice_check.py` | End-to-end check of your own voice with the real Chatterbox (CI runs it on Linux and with the Windows `.exe`) |
 | `test/gui_selftest.ps1` | Drives the GUI on Windows and screenshots it (CI runs it against the installed MSI) |
 | `test/check_video.py` | The end-to-end checks on a rendered video |
 | `test/make_test_deck.py` | Builds the narration test deck |
@@ -322,6 +355,10 @@ only for these, and nothing else:
 - **GitHub** (api.github.com and github.com), at most once a day while **Check for Deck
   Narrator updates** is on (the default), to see whether there's a newer release, and to
   download it when you press **Update**. Turn the check off in **Settings**.
+- **PyPI, PyTorch and HuggingFace** (files.pythonhosted.org, pypi.org,
+  download.pytorch.org, huggingface.co, and the Python builds uv fetches from
+  github.com), only when you set up [your own voice](OWN-VOICE.md), to download uv,
+  Python, Chatterbox and its model. Your recordings and voices never leave your computer.
 - **The Document Foundation** (download.documentfoundation.org), only when you run
   `install-dependencies.cmd` (or press **Install LibreOffice**, or tick the installer's
   checkbox) on a PC without PowerPoint or LibreOffice, to download LibreOffice.

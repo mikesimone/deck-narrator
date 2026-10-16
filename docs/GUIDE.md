@@ -237,6 +237,9 @@ Try one on a single slide: `deck-narrator deck.pptx --slides 1 --voice am_michae
 several, see [Switching voices](#switching-voices).
 Each voice is a ~0.5 MB download the first time it's used.
 
+**Your own voice:** Deck Narrator can also speak in your voice, copied from a 20-second
+recording. See [Your own voice](OWN-VOICE.md).
+
 Only English voices (`a*`, `b*`) work out of the box. Other languages (`e` Spanish,
 `f` French, `h` Hindi, `i` Italian, `j` Japanese, `p` Portuguese, `z` Mandarin) need
 extra misaki packages; the tool says so instead of failing obscurely.

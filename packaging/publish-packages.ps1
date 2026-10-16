@@ -3,7 +3,9 @@
 #   WINGET_TOKEN    a GitHub token (classic, public_repo) that can open pull requests on
 #                   microsoft/winget-pkgs; wingetcreate forks it into that account.
 #   CHOCO_API_KEY   the API key of the Chocolatey community account that owns the package.
-# Without a token that half is built and checked but not sent. Run by CI (ci.yml after a
+# Without a token that half is built and checked but not sent. A winget update is only sent
+# once the package is listed in winget at all: while the first submission is still in review,
+# a second one would only wait behind it (Mike, 2026-10-15). Run by CI (ci.yml after a
 # release, and packages.yml by hand):
 #   .\packaging\publish-packages.ps1 -Version 1.2.5 [-Msi path] [-TestInstall] [-Submit]
 param(
@@ -74,7 +76,15 @@ if ($TestInstall) {
 }
 
 if ($Submit) {
+    $listed = $true
     if ($env:WINGET_TOKEN) {
+        $gh = @{ Authorization = "Bearer $env:WINGET_TOKEN"; Accept = "application/vnd.github+json" }
+        try { Invoke-RestMethod -Headers $gh "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/m/MikeSimone/DeckNarrator" | Out-Null }
+        catch { if ([int]$_.Exception.Response.StatusCode -eq 404) { $listed = $false } else { throw } }
+    }
+    if ($env:WINGET_TOKEN -and -not $listed) {
+        Write-Host "winget: built, not submitted: MikeSimone.DeckNarrator isn't listed in winget yet (its first submission is still in review). Run packages.yml for this version once it is."
+    } elseif ($env:WINGET_TOKEN) {
         $wc = Join-Path $out "wingetcreate.exe"
         & curl.exe -L --fail --retry 3 -s -o $wc "https://aka.ms/wingetcreate/latest"
         if ($LASTEXITCODE) { throw "couldn't download wingetcreate" }
@@ -84,7 +94,6 @@ if ($Submit) {
         if ($LASTEXITCODE) { throw "wingetcreate submit failed: $LASTEXITCODE" }
         # Sign the CLA on the new PR right away, so the policy bot doesn't park it as Needs-CLA.
         try {
-            $gh = @{ Authorization = "Bearer $env:WINGET_TOKEN"; Accept = "application/vnd.github+json" }
             $q = [uri]::EscapeDataString("repo:microsoft/winget-pkgs is:pr is:open in:title `"$title`"")
             $pr = $null
             foreach ($try in 1..6) {      # the search index can lag the new PR by a few seconds

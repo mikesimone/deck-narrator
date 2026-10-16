@@ -49,3 +49,11 @@ Foundation by `install-dependencies.ps1` when it's needed, or Microsoft PowerPoi
 
 **Downloaded at first run** (source installs and the zip; the installer already has them): the Kokoro-82M model and voices from
 [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), Apache-2.0.
+
+## Your own voice (downloaded on request)
+
+Nothing for it is bundled. When you set up [your own voice](docs/OWN-VOICE.md), deck-narrator
+downloads, onto your machine only: [uv](https://github.com/astral-sh/uv) (MIT / Apache-2.0),
+a Python 3.11 build, [Chatterbox](https://github.com/resemble-ai/chatterbox) (MIT) with its
+dependencies from PyPI and PyTorch's index, each under its own license, and the
+[ResembleAI/chatterbox](https://huggingface.co/ResembleAI/chatterbox) model (MIT).
