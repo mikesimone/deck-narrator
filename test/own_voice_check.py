@@ -88,8 +88,11 @@ def main():
         overlap = len(norm(SAY) & norm(heard)) / len(norm(SAY))
         assert overlap >= 0.7, f"only {overlap:.0%} of the words came through"
 
+    deck = ROOT / "test" / "test-deck.pptx"
+    if not deck.is_file():
+        subprocess.run([sys.executable, str(ROOT / "test" / "make_test_deck.py")], check=True, stdout=subprocess.DEVNULL)
     video = work / "own.mp4"
-    run(ROOT / "test" / "test-deck.pptx", "--voice", "ci-voice", "--slides", "1", "-o", video, timeout=1800)
+    run(deck, "--voice", "ci-voice", "--slides", "1", "-o", video, timeout=1800)
     assert video.is_file() and video.stat().st_size > 10_000, "no video"
 
     run("--remove-voice", "ci-voice")
