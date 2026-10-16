@@ -26,6 +26,9 @@ for pkg in ("en_core_web_sm", "spacy", "transformers", "tokenizers", "huggingfac
             "safetensors", "tqdm", "regex", "requests", "numpy", "torch", "filelock", "packaging", "pyyaml"):
     datas += copy_metadata(pkg)
 
+# Your own voice: the worker runs in Chatterbox's separate Python, so it ships as a file.
+datas.append((os.path.join(SPECPATH, "..", "own_voice_worker.py"), "."))
+
 a = Analysis(
     ["../narrate.py"],
     pathex=[".."],

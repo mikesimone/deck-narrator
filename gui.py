@@ -45,6 +45,7 @@ COVERED = {
     "check_pronunciation", "json", "fix_word",   # Check pronunciation and its window
     "renderer",        # Settings: "Draw slides with"
     "add_word",        # Check pronunciation: Use this on a word the dictionary lacks
+    "install_own_voice", "add_voice", "remove_voice",   # Settings: Your own voice
     "help", "version",
 }
 
@@ -181,6 +182,8 @@ def config_path():
 
 
 def voice_label(v):
+    if not narrate.is_kokoro_name(v):
+        return f"{v}  (your own voice)"
     gender = {"f": "female", "m": "male"}.get(v[1:2], "?")
     return f"{v}  ({narrate.LANG_NAMES.get(v[0], '?')}, {gender})"
 
@@ -192,9 +195,23 @@ def voice_from_label(label):
 def build_args(f, mode):
     """Form values (a dict) -> CLI arguments for one action. Pure, so it's testable.
 
-    mode: "video", "builds", "check" (pronunciation), "phonemes" (whole deck), "phonemes_text", "sample".
+    mode: "video", "builds", "check" (pronunciation), "phonemes" (whole deck), "phonemes_text", "sample",
+    and for your own voice "install_own_voice", "add_voice" (own_voice_name, own_voice_file), "remove_voice".
     Raises ValueError with a user-facing message when something required is missing.
     """
+    if mode == "install_own_voice":
+        return ["--install-own-voice"]
+    if mode == "add_voice":
+        name = f.get("own_voice_name", "").strip().lower()
+        if not narrate.OWN_NAME.fullmatch(name) or narrate.is_kokoro_name(name) or name == "default":
+            raise ValueError("A voice name is up to 32 lowercase letters, digits, - or _, like mike or jane-doe.")
+        if not f.get("own_voice_file"):
+            raise ValueError("Choose a recording (.wav, .flac, .mp3) or a voice pack (.zip).")
+        return ["--add-voice", name, f["own_voice_file"]]
+    if mode == "remove_voice":
+        if not f.get("own_voice_name"):
+            raise ValueError("Choose one of your own voices to remove.")
+        return ["--remove-voice", f["own_voice_name"]]
     args = ["--voice", f["voice"], "--device", f["device"]]
     if f.get("pronunciations"):
         args += ["--pronunciations", f["pronunciations"]]
@@ -823,7 +840,23 @@ class App:
                      values=["auto", "cuda", "mps", "cpu"]).grid(row=1, column=1, sticky="w", **pad)
         ttk.Label(engine, text="auto = NVIDIA GPU or Apple Silicon if there is one", style="Hint.TLabel").grid(row=1, column=2, sticky="w", **pad)
 
-        upd = section(3, "Updates")
+        own = section(3, "Your own voice")
+        own.columnconfigure(1, weight=1)
+        self.own_status = ttk.Label(own, wraplength=420, justify="left")
+        self.own_status.grid(row=0, column=0, columnspan=2, sticky="w", **pad)
+        self.own_setup_btn = ttk.Button(own, command=self.setup_own_voice)
+        self.own_setup_btn.grid(row=0, column=2, sticky="e", **pad)
+        ttk.Button(own, text="Add a voice...", command=self.add_own_voice).grid(row=1, column=0, sticky="w", **pad)
+        self.own_pick = ttk.Combobox(own, state="readonly", width=18)
+        self.own_pick.grid(row=1, column=1, sticky="e", **pad)
+        ttk.Button(own, text="Remove", command=self.remove_own_voice).grid(row=1, column=2, sticky="e", **pad)
+        ttk.Label(own, text="Narrate in a real person's voice, using Chatterbox. A voice is a clear 10-30 second "
+                            "recording of them talking, or a voice pack (.zip). It runs best on an NVIDIA GPU or "
+                            "Apple Silicon; on a plain processor it's slow. Only use voices you have permission to use.",
+                  style="Hint.TLabel", wraplength=560, justify="left").grid(row=2, column=0, columnspan=3, sticky="w", padx=6)
+        self.show_own_voice()
+
+        upd = section(4, "Updates")
         ttk.Checkbutton(upd, text="Check for new voices at startup", variable=self.v["check_voices"]).grid(
             row=0, column=0, sticky="w", **pad)
         ttk.Button(upd, text="Check now", command=lambda: self.check_voices(force=True)).grid(row=0, column=1, **pad)
@@ -832,7 +865,7 @@ class App:
         ttk.Button(upd, text="Check now", command=lambda: self.check_updates(force=True)).grid(row=1, column=1, **pad)
 
         bottom = ttk.Frame(outer)
-        bottom.grid(row=4, column=0, sticky="ew")
+        bottom.grid(row=5, column=0, sticky="ew")
         ttk.Button(bottom, text="Buy me a coffee", command=self.open_tip_jar).pack(side="left")
         ttk.Label(bottom, text="Deck Narrator is free. If it saves you time, a tip keeps it going.",
                   style="Hint.TLabel").pack(side="left", padx=8)
@@ -840,6 +873,53 @@ class App:
         w.protocol("WM_DELETE_WINDOW", self.close_settings)
         self.root.update_idletasks()
         w.geometry(f"+{self.root.winfo_rootx() + 40}+{max(0, self.root.winfo_rooty() - 10)}")
+
+    def show_own_voice(self):
+        """Settings' "Your own voice": whether Chatterbox is set up, and the voices there are."""
+        if not (self.settings_win and self.settings_win.winfo_exists()):
+            return
+        ready = narrate.own_voice_ready()
+        voices = sorted(narrate.own_voices())
+        self.own_status.configure(text=(
+            ("Set up." if ready else "Not set up yet. Setting up downloads 4 to 6 GB, once.")
+            + (f" Your voices: {', '.join(voices)}." if voices else " No voices of your own yet.")))
+        self.own_setup_btn.configure(text="Repair" if ready else "Set up")
+        self.own_pick.configure(values=voices)
+        if self.own_pick.get() not in voices:
+            self.own_pick.set(voices[0] if voices else "")
+
+    def refresh_voices(self):
+        self.voice_box.configure(values=[voice_label(x) for x in narrate.available_voices()])
+        self.show_own_voice()
+
+    def setup_own_voice(self):
+        if not messagebox.askokcancel(TITLE, "Set up your own voice?\n\nThis downloads Chatterbox, its model and "
+                                             "torch: 4 to 6 GB, once, into your user folder. It can take a while; "
+                                             "the Log tab shows how it's going."):
+            return
+        self.run("install_own_voice")
+
+    def add_own_voice(self):
+        p = filedialog.askopenfilename(
+            title="Choose a recording or a voice pack", initialdir=self.last_dir,
+            filetypes=[("Recording or voice pack", "*.wav *.flac *.mp3 *.zip"), ("All files", "*.*")])
+        if not p:
+            return
+        self.last_dir = str(Path(p).parent)
+        guess = re.sub(r"[^a-z0-9_-]+", "-", Path(p).stem.lower()).strip("-_")
+        guess = re.sub(r"-voice.*$", "", guess)[:32] or "my-voice"
+        from tkinter import simpledialog
+        name = simpledialog.askstring(TITLE, "Name this voice (lowercase, like mike or jane-doe):",
+                                      initialvalue=guess, parent=self.settings_win or self.root)
+        if name:
+            self.pending_own = {"own_voice_name": name, "own_voice_file": p}
+            self.run("add_voice")
+
+    def remove_own_voice(self):
+        name = self.own_pick.get()
+        if name and messagebox.askyesno(TITLE, f"Delete your voice {name!r}? Its files are removed from this computer."):
+            self.pending_own = {"own_voice_name": name}
+            self.run("remove_voice")
 
     def open_tip_jar(self):
         import webbrowser
@@ -1189,6 +1269,7 @@ class App:
         f = {k: (v.get() if not isinstance(v, tk.BooleanVar) else bool(v.get())) for k, v in self.v.items()}
         f["voice"] = voice_from_label(f["voice"])
         f["sample_out"] = str(self.sample_wav)
+        f.update(getattr(self, "pending_own", None) or {})
         for k in ("deck", "output", "pronunciations"):
             f[k] = f[k].strip()
         return f
@@ -1209,12 +1290,14 @@ class App:
         self.mode = mode
         self.out_lines = []
         self.clear_log()
-        if mode != "sample":
+        if mode not in ("sample", "add_voice", "remove_voice"):
             self.tabs.select(self.log_tab)
         self.append("> deck-narrator " + " ".join(shlex.quote(a) for a in args))
         self.progress.configure(mode="indeterminate")
         self.progress.start(12)
         self.status.configure(text={"video": "Making the video...", "sample": "Synthesizing the sample...",
+                                    "install_own_voice": "Setting up your own voice (a large download)...",
+                                    "add_voice": "Adding the voice...", "remove_voice": "Removing the voice...",
                                     "builds": "Reading the deck's animations...", "check": "Checking pronunciation..."}.get(mode, "Working..."))
         self.cancel_btn.configure(state="normal")
         self.make_btn.configure(state="disabled")
@@ -1243,7 +1326,9 @@ class App:
             self.progress.stop()
             self.progress.configure(mode="determinate", value=(phase * 50) + 50 * done / total)
             self.status.configure(text=line)
-        elif line.startswith(("Loading Kokoro", "Measuring loudness", "Encoding")):
+        elif line.startswith(("Loading Kokoro", "Measuring loudness", "Encoding", "Starting Chatterbox",
+                              "Chatterbox is running", "Making a Python", "Installing Chatterbox",
+                              "Downloading the")):
             self.status.configure(text=line)
 
     def on_done(self, code, cancelled):
@@ -1253,6 +1338,9 @@ class App:
         self.cancel_btn.configure(state="disabled")
         self.make_btn.configure(state="normal")
         self.sample_btn.configure(state="normal")
+        self.pending_own = None
+        if self.mode in ("install_own_voice", "add_voice", "remove_voice"):
+            self.refresh_voices()
         if cancelled:
             self.status.configure(text="Cancelled.")
         elif code != 0:
@@ -1274,6 +1362,13 @@ class App:
             if getattr(self, "review", None):
                 self.review.close()
             self.review = PronunciationReview(self, issues, self.v["deck"].get())
+        elif self.mode == "install_own_voice":
+            self.status.configure(text="Your own voice is set up. Add a voice in Settings.")
+        elif self.mode == "add_voice":
+            name = next((l.split(":", 1)[1].strip() for l in self.out_lines if l.startswith("voice: ")), "")
+            if name:
+                self.v["voice"].set(voice_label(name))
+            self.status.configure(text=f"Voice {name} added and chosen. Try it with Play sample." if name else "Done.")
         elif self.mode == "sample":
             self.status.configure(text="Playing the sample.")
             try:

@@ -6,7 +6,7 @@
     wix extension add -g WixToolset.UI.wixext/5.0.2
     wix extension add -g WixToolset.Util.wixext/5.0.2
     wix build packaging\installer\DeckNarrator.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext
-        -d Version=1.2.6 -d AppDir=dist\deck-narrator -o deck-narrator.msi
+        -d Version=1.3.0 -d AppDir=dist\deck-narrator -o deck-narrator.msi
 
   Installs to Program Files\Deck Narrator for all users, adds a Start menu entry for the
   GUI and puts the folder on the system PATH (for deck-narrator.exe). Nothing on the
@@ -19,6 +19,11 @@
   For a silent install, ask for the same with INSTALLDEPS=1 (also skipped when either is there):
     msiexec /i deck-narrator.msi /qn INSTALLDEPS=1
   Either way it runs after the install has finished, so it can't fail the install.
+
+  When PowerPoint or LibreOffice is there (so the LibreOffice checkbox isn't needed), the
+  same checkbox, unticked, offers to set up "your own voice" instead: it runs
+  own-voice-setup.cmd (deck-narrator.exe --install-own-voice) for the user who installed,
+  a 4 to 6 GB download. Settings > Set up in the app does the same at any time.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
@@ -50,15 +55,23 @@
                  Value="Install LibreOffice to draw the slides (PowerPoint isn't installed; leaves Office's file types alone)" />
     <SetProperty Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Sequence="ui" Before="CostFinalize"
                  Condition="NOT Installed AND NOT (PPT64 OR PPT32 OR LO64 OR LO32)" Value="1" />
+    <SetProperty Action="SetOwnVoiceCheckboxText" Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Sequence="ui" Before="CostFinalize"
+                 Condition="NOT Installed AND (PPT64 OR PPT32 OR LO64 OR LO32)"
+                 Value="Set up your own voice now (Chatterbox: a 4 to 6 GB download; or later, in Settings)" />
     <Property Id="WixShellExecTarget" Value="[INSTALLFOLDER]install-dependencies.cmd" />
     <CustomAction Id="InstallDependencies" BinaryRef="Wix4UtilCA_X64" DllEntry="WixShellExec" Impersonate="yes" Return="ignore" />
+    <!-- Points the same WixShellExec at own-voice-setup.cmd; set when Finish is clicked, so
+         INSTALLFOLDER is final. -->
+    <CustomAction Id="OwnVoiceTarget" Property="WixShellExecTarget" Value="[INSTALLFOLDER]own-voice-setup.cmd" />
     <InstallExecuteSequence>
       <Custom Action="InstallDependencies" After="InstallFinalize" Condition="INSTALLDEPS = &quot;1&quot; AND NOT Installed AND NOT HAVE_RENDERER AND UILevel &lt; 5" />
     </InstallExecuteSequence>
 
     <UI>
       <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
-      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="InstallDependencies"
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="OwnVoiceTarget" Order="1"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed AND HAVE_RENDERER" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="InstallDependencies" Order="2"
                Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
     </UI>
 

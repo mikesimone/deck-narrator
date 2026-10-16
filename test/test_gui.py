@@ -83,6 +83,30 @@ class BuildArgs(unittest.TestCase):
 
 
 @unittest.skipIf(gui is None, "tkinter not available")
+@unittest.skipIf(gui is None, "tkinter not available")
+class OwnVoiceArgs(unittest.TestCase):
+    def parse(self, args):
+        return narrate.build_parser().parse_args(args)
+
+    def test_modes(self):
+        self.assertTrue(self.parse(gui.build_args(form(), "install_own_voice")).install_own_voice)
+        a = self.parse(gui.build_args(form(own_voice_name=" Mike ", own_voice_file="/r/mike.zip"), "add_voice"))
+        self.assertEqual(a.add_voice, ["mike", "/r/mike.zip"])
+        self.assertEqual(self.parse(gui.build_args(form(own_voice_name="mike"), "remove_voice")).remove_voice, "mike")
+
+    def test_bad_input(self):
+        for f in (form(own_voice_name="af_heart", own_voice_file="/r.wav"), form(own_voice_name="mike"),
+                  form(own_voice_name="jane doe", own_voice_file="/r.wav")):
+            with self.assertRaises(ValueError):
+                gui.build_args(f, "add_voice")
+        with self.assertRaises(ValueError):
+            gui.build_args(form(), "remove_voice")
+
+    def test_label(self):
+        self.assertEqual(gui.voice_label("mike"), "mike  (your own voice)")
+        self.assertEqual(gui.voice_from_label(gui.voice_label("mike")), "mike")
+
+
 class SameWord(unittest.TestCase):
     """Use this on a new word settles every listed instance of it (issue #6)."""
 

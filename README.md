@@ -43,6 +43,7 @@ puts each `[click]` where an animation happens, and respells names the voice wou
 - **[How to fix pronunciations](docs/PRONUNCIATION.md):** when the voice says a word wrong.
 - **[Using Deck Narrator](docs/GUIDE.md):** the window, writing good notes, animations,
   more than one voice, and what error messages mean.
+- **[Your own voice](docs/OWN-VOICE.md):** narrate in your voice, from a 20-second recording.
 - **[Reference](docs/REFERENCE.md):** the command line, every option, and the technical details.
 - **Something not working?** [Open an issue](https://github.com/mikesimone/deck-narrator/issues).
 
@@ -56,7 +57,7 @@ Deck Narrator is free. If it saves you time, a tip keeps it going:
 
 Your decks, notes and videos never leave your computer, and Deck Narrator collects nothing
 about you. It goes online only to download voices, to check for updates (both can be
-turned off), and to fetch LibreOffice if you ask it to. [Details](docs/REFERENCE.md#privacy).
+turned off), and to fetch LibreOffice or your-own-voice support if you ask it to. [Details](docs/REFERENCE.md#privacy).
 
 ## License
 

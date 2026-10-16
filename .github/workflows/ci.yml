@@ -2,6 +2,8 @@
 # zip (PyInstaller, CPU torch) and tests the built .exe with the same suite, then builds
 # the MSI installer (WiX, with the voice model bundled), installs it, runs the suite and
 # the GUI against the installed copy with HuggingFace switched off, and uninstalls it.
+# "Your own voice" (Chatterbox, a 4 to 6 GB download) is set up and spoken with for real
+# on Linux (own-voice job) and with the built Windows .exe, on the CPU.
 # On a v* tag push, or a manual run with "release" ticked, both go on a GitHub release.
 name: ci
 on:
@@ -38,6 +40,26 @@ jobs:
           sudo apt-get install -y --no-install-recommends xvfb
           xvfb-run -a .venv/bin/python gui.py --selftest builds test/anim-deck.pptx "$RUNNER_TEMP/gui.txt" 0
           cat "$RUNNER_TEMP/gui.txt"
+
+  # Your own voice, from source: sets Chatterbox up in its own Python, makes a voice from
+  # a recording, speaks with it (checked with faster-whisper) and narrates a slide.
+  own-voice:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      DECK_NARRATOR_TORCH_BACKEND: cpu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-kokoro-82m-v1
+      - name: Setup (setup.sh)
+        run: ./setup.sh
+      - name: Your own voice (Chatterbox)
+        run: |
+          uv pip install --python .venv/bin/python faster-whisper
+          .venv/bin/python test/own_voice_check.py
 
   # Apple Silicon. From source for now (Homebrew ffmpeg and LibreOffice); the runners
   # have no Metal GPU, so the suite runs on the CPU.
@@ -127,7 +149,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    timeout-minutes: 180
+    timeout-minutes: 240
     defaults:
       run:
         shell: pwsh
@@ -166,7 +188,8 @@ jobs:
           Copy-Item -Recurse docs dist\deck-narrator\docs
           Copy-Item packaging\WINDOWS-STANDALONE.txt dist\deck-narrator\README-FIRST.txt
           Copy-Item -Recurse packaging\licenses dist\deck-narrator\licenses
-          Copy-Item packaging\install-dependencies.ps1, packaging\install-dependencies.cmd dist\deck-narrator\
+          Copy-Item packaging\install-dependencies.ps1, packaging\install-dependencies.cmd, packaging\own-voice-setup.cmd dist\deck-narrator\
+          if (-not (Test-Path dist\deck-narrator\_internal\own_voice_worker.py)) { throw "own_voice_worker.py isn't in the build" }
       # ffmpeg ships inside the app (dist\deck-narrator\ffmpeg), so users never install it.
       # gyan.dev's release "essentials" build: GPL-3.0, with libx264 for the H.264 encode.
       - name: Bundle ffmpeg
@@ -188,6 +211,13 @@ jobs:
           if ($LASTEXITCODE) { throw "prerender_samples.py failed" }
       - name: Test suite (standalone .exe)
         run: .\.venv\Scripts\python.exe test\verify.py --exe dist\deck-narrator\deck-narrator.exe --device cpu
+      # Sets Chatterbox up from the .exe (uv, its own Python, CPU torch), then speaks with it.
+      - name: Your own voice (standalone .exe)
+        env:
+          DECK_NARRATOR_TORCH_BACKEND: cpu
+        run: |
+          .\.venv\Scripts\python.exe test\own_voice_check.py --exe dist\deck-narrator\deck-narrator.exe
+          if ($LASTEXITCODE) { throw "own voice check failed" }
       - name: Zip
         run: 7z a -tzip -mx=5 deck-narrator-windows-x64.zip .\dist\deck-narrator
       - uses: actions/upload-artifact@v4
@@ -213,7 +243,7 @@ jobs:
           $p = Start-Process msiexec.exe -ArgumentList "/i", "deck-narrator-$env:VERSION-x64.msi", "/qn", "INSTALLDEPS=1", "/l*v", "install.log" -Wait -PassThru
           if ($p.ExitCode) { Get-Content install.log -Tail 60; throw "install failed: $($p.ExitCode)" }
           $dir = "$env:ProgramFiles\Deck Narrator"
-          foreach ($f in "deck-narrator.exe", "deck-narrator-gui.exe", "install-dependencies.cmd", "install-dependencies.ps1",
+          foreach ($f in "deck-narrator.exe", "deck-narrator-gui.exe", "install-dependencies.cmd", "install-dependencies.ps1", "own-voice-setup.cmd", "_internal\own_voice_worker.py",
                       "ffmpeg\ffmpeg.exe", "samples", "model\kokoro-v1_0.pth", "model\voices\af_heart.pt") {
             if (-not (Test-Path "$dir\$f")) { throw "not installed: $f" }
           }
