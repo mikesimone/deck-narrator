@@ -37,6 +37,7 @@ DEFAULT_VOICE = "af_heart"
 CHUNK_CHARS = 350            # max characters per TTS call; split at sentence ends
 OWN_CHUNK_CHARS = 200        # the same for your own voice: Chatterbox stays steadier on short chunks
 CHUNK_GAP = 0.20             # seconds of silence between TTS chunks of one speaker
+OWN_CHUNK_GAP = 0.35         # the same for your own voice, which runs its sentences together otherwise
 TURN_GAP = 0.35              # seconds between a click and the next words, or between two voices
 BUILD_HOLD = 1.0             # default seconds per build state that has no narration of its own
 LOUDNORM = "I=-16:TP=-1.5:LRA=11"
@@ -923,7 +924,7 @@ class TTS:
         import numpy as np
         pipe = self.pipe(voice)
         out = []
-        gap = np.zeros(int(CHUNK_GAP * SAMPLE_RATE), dtype=np.float32)
+        gap = np.zeros(int((CHUNK_GAP if pipe is not None else OWN_CHUNK_GAP) * SAMPLE_RATE), dtype=np.float32)
         if pipe is None and speed != 1.0 and not self.speed_noted:
             log("Note: speed applies to the built-in voices only; your own voice speaks at its natural pace.")
             self.speed_noted = True
@@ -1380,7 +1381,8 @@ def add_voice(name, src):
             if models:
                 copy(models[0], staging / "t3.safetensors")
             if settings:
-                keep = {k: float(settings[k]) for k in ("exaggeration", "cfg_weight", "temperature") if k in settings}
+                keep = {k: float(settings[k]) for k in ("exaggeration", "cfg_weight", "temperature", "speed", "pause_scale")
+                        if k in settings}
                 if timbre:
                     if not timbre.lower().endswith(AUDIO_EXTS):
                         raise Fail(f"--add-voice: timbre_reference {timbre!r} isn't a recording (.wav, .flac, .mp3)")
@@ -1455,6 +1457,26 @@ def trim_edges(audio, margin=0.05):
         return audio
     keep = int(margin * SAMPLE_RATE)
     return audio[max(0, loud[0] * frame - keep):min(len(audio), (loud[-1] + 1) * frame + keep)]
+
+
+def own_voice_speed(folder):
+    """voice.json's speed (1.0 if it has none), within what ffmpeg's atempo does in one pass."""
+    try:
+        speed = float(json.loads((Path(folder) / "voice.json").read_text(encoding="utf-8")).get("speed", 1.0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 1.0
+    return min(2.0, max(0.5, speed))
+
+
+def time_stretch(audio, speed, tmp):
+    """Slower (speed < 1) or faster, keeping the pitch: ffmpeg's atempo."""
+    import soundfile as sf
+    src, dst = Path(tmp) / "stretch-in.wav", Path(tmp) / "stretch-out.wav"
+    sf.write(src, audio, SAMPLE_RATE, subtype="FLOAT")
+    run([find_ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(src), "-filter:a", f"atempo={speed}",
+         "-c:a", "pcm_f32le", str(dst)], "slowing your voice down" if speed < 1 else "speeding your voice up")
+    out, _ = sf.read(str(dst), dtype="float32")
+    return out if out.ndim == 1 else out.mean(axis=1)
 
 
 def fade_edges(audio, seconds=0.01):
@@ -1556,6 +1578,9 @@ class OwnVoice:
         if audio.ndim > 1:
             audio = audio.mean(axis=1)
         audio = np.ascontiguousarray(audio, dtype=np.float32)
+        speed = own_voice_speed(own_voices()[voice])
+        if speed != 1.0:
+            audio = time_stretch(audio, speed, self.tmp)
         floor = noise_floor(audio)
         if floor is not None:
             self.floors.append(floor)

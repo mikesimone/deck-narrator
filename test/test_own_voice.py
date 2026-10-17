@@ -105,16 +105,19 @@ class AddAndRemove(OwnVoiceCase):
         d = narrate.own_voices()["mike"]
         self.assertEqual((d / "t3.safetensors").read_bytes(), b"weights")
         self.assertEqual(json.loads((d / "voice.json").read_text()), {"cfg_weight": 0.3, "temperature": 0.8})
-        self.assertEqual(own_voice_worker.settings_of(d), {"exaggeration": 0.5, "cfg_weight": 0.3, "temperature": 0.8})
+        self.assertEqual(own_voice_worker.settings_of(d), {"exaggeration": 0.5, "cfg_weight": 0.3, "temperature": 0.8,
+                                                                  "pause_scale": 1.0, "speed": 1.0})
 
     def test_voice_pack_with_timbre(self):
         rec = recording(self.tmp / "r.wav", 12).read_bytes()
         z = self.pack({"reference.wav": rec, "clean.wav": rec,
-                       "voice.json": json.dumps({"timbre_reference": "clean.wav", "cfg_weight": 0.3, "junk": 1})})
+                       "voice.json": json.dumps({"timbre_reference": "clean.wav", "cfg_weight": 0.3, "junk": 1,
+                                                 "speed": 0.95, "pause_scale": 1.6})})
         narrate.add_voice("mike", z)
         d = self.tmp / "my-voices" / "mike"
         self.assertEqual(json.loads((d / "voice.json").read_text()),
-                         {"cfg_weight": 0.3, "timbre_reference": "timbre_reference.wav"})
+                         {"cfg_weight": 0.3, "speed": 0.95, "pause_scale": 1.6,
+                          "timbre_reference": "timbre_reference.wav"})
         self.assertEqual(own_voice_worker.timbre_of(d), d / "timbre_reference.wav")
         with self.assertRaises(narrate.Fail):
             narrate.add_voice("jane", self.pack({"reference.wav": rec, "voice.json": '{"timbre_reference": "x.wav"}'}))
@@ -289,6 +292,41 @@ class Sound(unittest.TestCase):
         speech = np.concatenate([hiss, hiss + 0.3 * np.sin(2 * np.pi * 200 * t).astype(np.float32)])
         self.assertAlmostEqual(narrate.noise_floor(speech), -55, delta=3)
         self.assertIsNone(narrate.noise_floor(np.zeros(24000, dtype=np.float32)))
+
+
+class Pace(unittest.TestCase):
+    def test_extend_pauses(self):
+        sr = 24000
+        t = np.arange(sr // 2) / sr
+        word = (0.3 * np.sin(2 * np.pi * 200 * t)).astype(np.float32)
+        gap = np.full(int(0.3 * sr), 1e-4, dtype=np.float32)
+        x = np.concatenate([gap, word, gap, word, gap])
+        y = own_voice_worker.extend_pauses(x, sr, 1.6)
+        self.assertAlmostEqual((len(y) - len(x)) / sr, 0.18, delta=0.02)    # only the middle pause, 0.3 s x 0.6
+        self.assertIs(own_voice_worker.extend_pauses(x, sr, 1.0), x)
+
+    def test_speed_from_voice_json(self):
+        d = Path(tempfile.mkdtemp(prefix="dn-speed-"))
+        try:
+            self.assertEqual(narrate.own_voice_speed(d), 1.0)
+            (d / "voice.json").write_text('{"speed": 0.95}')
+            self.assertEqual(narrate.own_voice_speed(d), 0.95)
+            (d / "voice.json").write_text('{"speed": 9}')
+            self.assertEqual(narrate.own_voice_speed(d), 2.0)
+            (d / "voice.json").write_text('not json')
+            self.assertEqual(narrate.own_voice_speed(d), 1.0)
+        finally:
+            shutil.rmtree(d)
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "needs ffmpeg")
+    def test_time_stretch(self):
+        d = Path(tempfile.mkdtemp(prefix="dn-stretch-"))
+        try:
+            t = np.arange(24000) / 24000
+            y = narrate.time_stretch((0.3 * np.sin(2 * np.pi * 200 * t)).astype(np.float32), 0.8, d)
+            self.assertAlmostEqual(len(y) / 24000, 1.25, delta=0.03)
+        finally:
+            shutil.rmtree(d)
 
 
 class CutOffCheck(unittest.TestCase):

@@ -253,6 +253,10 @@ Python rather than sharing deck-narrator's:
   the last sound isn't clipped. faster-whisper (`base.en`, on the CPU) then transcribes the
   clip; if the last word or much of the text is missing, it's spoken again with the next
   seed, up to 3 tries, keeping the best. Retries are logged and are just as repeatable.
+- A voice pack's `pause_scale` lengthens each pause of at least 0.12 s inside a clip (by
+  repeating its own quiet audio, at most 0.35 s added), and `speed` time-stretches the clip
+  with ffmpeg's `atempo`, keeping the pitch. Sentences of your own voice are 0.35 s apart
+  (Kokoro's chunks, 0.2 s).
 - Clips are trimmed, faded in and out (10 ms), and the gaps between them get a quiet room
   tone at the clips' own background level (clamped to -70 to -45 dBFS) instead of digital
   silence, so the joins don't sound like the audio switching off.

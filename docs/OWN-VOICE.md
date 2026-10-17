@@ -94,7 +94,7 @@ Make a `.zip` (or a folder) with:
 |---|---|
 | `reference.wav` (or `.flac`, `.mp3`) | Required. 10 to 30 seconds of the person |
 | `t3.safetensors` | Optional. Your fine-tuned T3 weights (Chatterbox 0.1.7's T3, same shape; `t3.` or `module.` prefixes are fine) |
-| `voice.json` | Optional. `{"exaggeration": 0.5, "cfg_weight": 0.3, "temperature": 0.8}`; anything left out uses Chatterbox's default. Add `"timbre_reference": "clean.wav"` to use a second recording for the sound of the voice |
+| `voice.json` | Optional. `{"exaggeration": 0.5, "cfg_weight": 0.3, "temperature": 0.8}`; anything left out uses Chatterbox's default. Add `"timbre_reference": "clean.wav"` to use a second recording for the sound of the voice. `"pause_scale": 1.6` lengthens the pauses inside sentences, and `"speed": 0.95` slows the voice a little without changing its pitch (both 1.0 when left out) |
 | the timbre recording | Optional, named in `voice.json`. A clean, quiet recording that sets how the voice *sounds*, while `reference.wav` still sets how it *speaks*. Useful when the recording that matches your delivery has room noise |
 
 Then add it like a recording: **Add a voice...** and pick the `.zip`. Lower `cfg_weight` and
