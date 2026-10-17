@@ -28,13 +28,14 @@ import builds as anim
 if sys.platform == "darwin":
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 SAMPLE_RATE = 24000          # Kokoro's native output rate
 FPS = 30
 WIDTH, HEIGHT = 1920, 1080
 REPO_ID = "hexgrad/Kokoro-82M"
 DEFAULT_VOICE = "af_heart"
 CHUNK_CHARS = 350            # max characters per TTS call; split at sentence ends
+OWN_CHUNK_CHARS = 200        # the same for your own voice: Chatterbox stays steadier on short chunks
 CHUNK_GAP = 0.20             # seconds of silence between TTS chunks of one speaker
 TURN_GAP = 0.35              # seconds between a click and the next words, or between two voices
 BUILD_HOLD = 1.0             # default seconds per build state that has no narration of its own
@@ -139,6 +140,8 @@ def build_parser():
                    help="make a voice of your own called NAME from FILE: a 10-30 second recording of the person "
                         "(.wav, .flac, .mp3) or a voice pack (.zip), and exit")
     p.add_argument("--remove-voice", metavar="NAME", help="delete your own voice NAME, and exit")
+    p.add_argument("--remove-own-voice-support", action="store_true",
+                   help="delete Chatterbox and its download (frees 4 to 6 GB; your voices are kept), and exit")
     return p
 
 
@@ -695,26 +698,26 @@ def render_states(deck_path, tmp, slides, selected, renderer="libreoffice"):
 
 # ---------------------------------------------------------------- TTS
 
-def split_sentences(text):
-    """Split at sentence ends, then pack sentences into <= CHUNK_CHARS chunks."""
+def split_sentences(text, limit=CHUNK_CHARS):
+    """Split at sentence ends, then pack sentences into <= limit-character chunks."""
     sentences = [s for s in re.split(r"(?<=[.!?…])[\"')\]]*\s+", text) if s.strip()]
     pieces = []
     for s in sentences:
         # A single run-on "sentence" longer than the limit: break at commas/
         # semicolons, then at spaces as a last resort. Never drop words.
-        while len(s) > CHUNK_CHARS:
-            cut = max(s.rfind(sep, 0, CHUNK_CHARS) for sep in (", ", "; ", ": ", " - "))
+        while len(s) > limit:
+            cut = max(s.rfind(sep, 0, limit) for sep in (", ", "; ", ": ", " - "))
             if cut <= 0:
-                cut = s.rfind(" ", 0, CHUNK_CHARS)
+                cut = s.rfind(" ", 0, limit)
             if cut <= 0:
-                cut = CHUNK_CHARS
+                cut = limit
             pieces.append(s[:cut + 1].strip())
             s = s[cut + 1:].strip()
         if s:
             pieces.append(s)
     chunks, cur = [], ""
     for piece in pieces:
-        if cur and len(cur) + 1 + len(piece) > CHUNK_CHARS:
+        if cur and len(cur) + 1 + len(piece) > limit:
             chunks.append(cur)
             cur = piece
         else:
@@ -834,8 +837,12 @@ def mps_available(torch):
 
 
 def resolve_device(choice):
+    """Where Kokoro runs. Your own voice decides for itself, in Chatterbox's own Python."""
     import torch
     if choice == "cuda" and not torch.cuda.is_available():
+        if getattr(sys, "frozen", False):       # the installer and zip bundle a CPU-only torch
+            log("Note: the built-in voices run on the processor in this build; --device cuda applies to your own voice.")
+            return "cpu"
         raise Fail("--device cuda requested but CUDA is not available to torch")
     if choice == "mps" and not mps_available(torch):
         raise Fail("--device mps requested but Apple's Metal GPU is not available to torch")
@@ -849,12 +856,24 @@ class TTS:
     English need different ones), voices loaded on demand; plus your own voices, spoken by
     Chatterbox. Each engine starts the first time one of its voices is used."""
 
-    def __init__(self, device):
-        self.device = device
+    def __init__(self, device="auto"):
+        self.choice = device            # as asked: auto, cuda, mps or cpu
+        self._device = None
         self.model = None
         self.pipes = {}
         self.own = None
         self.speed_noted = False
+        self.floor = None               # set from your own voice's clips when it closes
+        self.own_total = 0              # your-own-voice chunks this run, for the progress line
+        self.own_done = 0
+        self.own_seconds = 0.0
+
+    @property
+    def device(self):
+        """Kokoro's device, worked out (with deck-narrator's own torch) when first needed."""
+        if self._device is None:
+            self._device = resolve_device(self.choice)
+        return self._device
 
     def kokoro(self):
         if self.model is not None:
@@ -883,7 +902,7 @@ class TTS:
         check_voice_name(voice, where)
         if is_own_voice(voice):
             if self.own is None:
-                self.own = OwnVoice(self.device)
+                self.own = OwnVoice(self.choice)   # Chatterbox's torch decides, not ours
             self.own.load(voice)
             return None
         from kokoro import KPipeline
@@ -908,9 +927,11 @@ class TTS:
         if pipe is None and speed != 1.0 and not self.speed_noted:
             log("Note: speed applies to the built-in voices only; your own voice speaks at its natural pace.")
             self.speed_noted = True
-        for chunk in split_sentences(plain_text(text) if pipe is None else text):
+        for chunk in (split_sentences(plain_text(text), OWN_CHUNK_CHARS) if pipe is None else split_sentences(text)):
             if pipe is None:
+                t0 = time.time()
                 parts = [self.own.say(voice, chunk)]
+                self.own_progress(time.time() - t0)
             else:
                 parts = []
                 for result in pipe(chunk, voice=voice_ref(voice), speed=speed, split_pattern=None):
@@ -923,10 +944,44 @@ class TTS:
             out.extend(parts)
         return np.concatenate(out)
 
+    def own_progress(self, took):
+        """A line per own-voice chunk: it can be slow, and silence looks like a hang."""
+        self.own_done += 1
+        self.own_seconds += took
+        total = max(self.own_total, self.own_done)
+        left = (total - self.own_done) * self.own_seconds / self.own_done
+        eta = f", about {fmt_duration(left)} left" if self.own_total and self.own_done < total else ""
+        log(f"Your voice: {self.own_done} of {total} sentences ({took:.1f}s each{eta})"
+            if self.own_total else f"Your voice: sentence {self.own_done} ({took:.1f}s)")
+
+    def room_floor(self):
+        """The median noise floor of your own voice's clips this run, or None if none were spoken."""
+        if self.own is None or not self.own.floors:
+            return None
+        f = sorted(self.own.floors)
+        return f[len(f) // 2]
+
     def close(self):
         if self.own is not None:
+            self.floor = self.room_floor()
             self.own.close()
             self.own = None
+
+
+def fmt_duration(seconds):
+    seconds = int(round(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    m, s_ = divmod(seconds, 60)
+    if m < 60:
+        return f"{m} min {s_:02d}s" if m < 10 else f"{m} min"
+    h, m = divmod(m, 60)
+    return f"{h} h {m:02d} min"
+
+
+def own_chunks(text):
+    """How many chunks your own voice will speak text in (for the progress line)."""
+    return len(split_sentences(plain_text(text), OWN_CHUNK_CHARS))
 
 
 def speech_level(audio):
@@ -1002,6 +1057,9 @@ def print_voices(voices, source):
 CHATTERBOX = "chatterbox-tts==0.1.7"
 CHATTERBOX_TORCH = "2.8.0"             # 0.1.7 pins 2.6.0, which can't use RTX 50-series GPUs
 OWN_PYTHON = "3.11"
+CHECKER = "faster-whisper==1.2.1"      # hears each clip, so one Chatterbox cut short is made again
+OWN_ENGINE = 2                         # bump when the worker's output changes, so saved samples are remade
+OWN_FREE_GB = 10                       # free disk space the setup asks for
 # uv, the installer that builds the environment: a pinned release from PyPI, checked by hash.
 UV_WHEELS = {
     "win": ("https://files.pythonhosted.org/packages/1f/72/c98ecbe0c4dbaf9118776053688a43dfca5708d86223cf3aa5d38066df21/"
@@ -1046,6 +1104,25 @@ def own_python():
 
 def own_voice_ready():
     return (own_voice_home() / "ready.json").is_file() and own_python().is_file()
+
+
+def own_voice_info():
+    """What the setup wrote in ready.json ({} if it isn't set up): the backend, and whether
+    Chatterbox's torch saw an NVIDIA GPU ("cuda", "gpu") or Apple's ("mps")."""
+    try:
+        return json.loads((own_voice_home() / "ready.json").read_text(encoding="utf-8")) if own_voice_ready() else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def own_voice_where(info=None):
+    """'NVIDIA GeForce RTX 5090', 'Apple Silicon GPU', 'processor', or '' if unknown."""
+    info = own_voice_info() if info is None else info
+    if info.get("cuda"):
+        return info.get("gpu") or "NVIDIA GPU"
+    if info.get("mps"):
+        return "Apple Silicon GPU"
+    return "processor" if "cuda" in info else ""
 
 
 def own_voices():
@@ -1147,22 +1224,27 @@ def install_own_voice():
     Safe to run again: it repairs or updates what's there."""
     home = own_voice_home()
     home.mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(home).free / 1e9
+    if free < OWN_FREE_GB and not own_python().is_file():
+        raise Fail(f"your own voice needs about {OWN_FREE_GB} GB free on the drive with {home} "
+                   f"(it has {free:.1f} GB). Free some space and try again.")
     (home / "ready.json").unlink(missing_ok=True)
     uv = fetch_uv(home)
     env = child_env(UV_PYTHON_INSTALL_DIR=home / "python", UV_CACHE_DIR=home / "uv-cache",
                     UV_LINK_MODE="copy", UV_PYTHON_PREFERENCE="only-managed")
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WINDOWS else {}
 
-    def step(what, cmd):
+    def step(what, cmd, report=False):
         log(what)
         try:
-            code = subprocess.run([str(c) for c in cmd], env=env, stdin=subprocess.DEVNULL,
-                                  stdout=sys.stderr, stderr=sys.stderr, **flags).returncode
+            r = subprocess.run([str(c) for c in cmd], env=env, stdin=subprocess.DEVNULL, text=True,
+                               stdout=subprocess.PIPE if report else sys.stderr, stderr=sys.stderr, **flags)
         except OSError as e:
             raise Fail(f"{what.rstrip('.')} failed: {e}")
-        if code:
-            raise Fail(f"{what.rstrip('.')} failed (exit code {code}); the lines above say why. "
+        if r.returncode:
+            raise Fail(f"{what.rstrip('.')} failed (exit code {r.returncode}); the lines above say why. "
                        "Running it again picks up where it stopped.")
+        return last_json(r.stdout) if report else None
 
     if not own_python().is_file():
         step(f"Making a Python {OWN_PYTHON} environment...", [uv, "venv", "--python", OWN_PYTHON, home / "venv"])
@@ -1171,26 +1253,93 @@ def install_own_voice():
     # setuptools 81+ dropped pkg_resources, which Chatterbox's watermarker (resemble-perth)
     # imports; without it the model doesn't load.
     overrides.write_text(f"torch=={CHATTERBOX_TORCH}\ntorchaudio=={CHATTERBOX_TORCH}\nsetuptools<81\n", encoding="utf-8")
-    cmd = [uv, "pip", "install", "--python", own_python(), "--override", overrides, CHATTERBOX, "soundfile"]
+    cmd = [uv, "pip", "install", "--python", own_python(), "--override", overrides, CHATTERBOX, "soundfile", CHECKER]
     if backend:
         cmd[3:3] = ["--torch-backend", backend]
     what = {"cpu": "for the processor", None: "for Apple Silicon"}.get(backend, f"for NVIDIA GPUs ({backend})")
     step(f"Installing Chatterbox and torch {what}. This downloads 1 to 3 GB...", cmd)
-    step("Downloading the Chatterbox model (about 3 GB) and checking it loads...",
-         [own_python(), "-I", worker_script(), "--prefetch"])
+    found = step("Downloading the Chatterbox model (about 3 GB) and checking it loads...",
+                 [own_python(), "-I", worker_script(), "--prefetch"], report=True)
     shutil.rmtree(home / "uv-cache", ignore_errors=True)
-    (home / "ready.json").write_text(json.dumps({"deck_narrator": VERSION, "package": CHATTERBOX,
-                                                 "torch": CHATTERBOX_TORCH, "backend": backend or "default"}),
-                                     encoding="utf-8")
-    log(f"Your own voice is set up (in {home}). Add a voice with --add-voice NAME RECORDING, "
-        "or Settings > Add a voice.")
+    write_ready(home, backend, found)
+    where = own_voice_where()
+    log(f"Your own voice is set up (in {home}), and runs on the {where}. Add a voice with "
+        "--add-voice NAME RECORDING, or Settings > Add a voice.")
+    if where == "processor":
+        log("Without an NVIDIA graphics card your own voice is slow: expect several minutes per slide.")
     print("own-voice: ready")
+    return 0
+
+
+def last_json(text):
+    for line in reversed((text or "").splitlines()):
+        try:
+            return json.loads(line)
+        except ValueError:
+            continue
+    return {}
+
+
+def write_ready(home, backend, found):
+    info = {"deck_narrator": VERSION, "package": CHATTERBOX, "torch": CHATTERBOX_TORCH,
+            "backend": backend or "default", "checker": CHECKER}
+    info.update({k: found.get(k) for k in ("cuda", "mps", "gpu")})
+    (home / "ready.json").write_text(json.dumps(info), encoding="utf-8")
+
+
+def upgrade_own_voice():
+    """A setup from 1.3.0 lacks the cut-off checker: add it (about 200 MB) before the first use.
+    If that fails, your voice still works, without the check."""
+    home = own_voice_home()
+    info = own_voice_info()
+    if info.get("checker") == CHECKER:
+        return
+    uv = home / "uv" / ("uv.exe" if IS_WINDOWS else "uv")
+    if not uv.is_file():
+        return
+    log("Updating your own voice's setup (adds the cut-off check, about 200 MB, once)...")
+    env = child_env(UV_PYTHON_INSTALL_DIR=home / "python", UV_CACHE_DIR=home / "uv-cache",
+                    UV_LINK_MODE="copy", UV_PYTHON_PREFERENCE="only-managed")
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WINDOWS else {}
+    try:
+        overrides = home / "overrides.txt"
+        cmd = [str(uv), "pip", "install", "--python", str(own_python()), CHECKER]
+        if overrides.is_file():
+            cmd[3:3] = ["--override", str(overrides)]
+        if subprocess.run(cmd, env=env, stdin=subprocess.DEVNULL, stdout=sys.stderr, stderr=sys.stderr,
+                          **flags).returncode:
+            raise OSError("the install failed")
+        r = subprocess.run([str(own_python()), "-I", str(worker_script()), "--prefetch-check"], env=env, text=True,
+                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=sys.stderr, **flags)
+        if r.returncode:
+            raise OSError("the download failed")
+    except OSError as e:
+        log(f"Note: couldn't add the cut-off check ({e}); your voice works without it. Repair in Settings tries again.")
+        return
+    finally:
+        shutil.rmtree(home / "uv-cache", ignore_errors=True)
+    write_ready(home, info.get("backend"), last_json(r.stdout))
+
+
+def remove_own_voice_support():
+    """--remove-own-voice-support: Chatterbox, its Python and its model go; my-voices stays."""
+    home = own_voice_home()
+    if not home.exists():
+        log("Your own voice isn't set up; nothing to remove.")
+        return 0
+    (home / "ready.json").unlink(missing_ok=True)
+    shutil.rmtree(home, ignore_errors=True)
+    if home.exists():
+        raise Fail(f"couldn't delete all of {home}; close Deck Narrator's other windows and try again")
+    log(f"Removed Chatterbox ({home}). Your voices in {my_voices_dir()} are kept; "
+        "Set up brings them back.")
     return 0
 
 
 def add_voice(name, src):
     """--add-voice NAME FILE: a recording (.wav, .flac, .mp3) or a voice pack (.zip or a
-    folder with reference.wav and maybe t3.safetensors and voice.json) becomes a voice."""
+    folder with reference.wav and maybe t3.safetensors, voice.json and the timbre recording
+    voice.json names) becomes a voice."""
     import zipfile
     name = name.strip().lower()
     if not OWN_NAME.fullmatch(name) or is_kokoro_name(name) or name == "default":
@@ -1210,8 +1359,18 @@ def add_voice(name, src):
                 with (open(files[n], "rb") if z is None else z.open(files[n])) as f, open(dest, "wb") as out:
                     shutil.copyfileobj(f, out, 1 << 20)
                 return dest
+            settings = {}
+            if "voice.json" in files:
+                with (open(files["voice.json"], "rb") if z is None else z.open(files["voice.json"])) as f:
+                    try:
+                        settings = json.loads(f.read().decode("utf-8"))
+                    except ValueError as e:
+                        raise Fail(f"--add-voice: voice.json in {src.name} isn't valid JSON: {e}")
+            timbre = Path(str(settings.get("timbre_reference") or "")).name or None
+            if timbre and timbre not in files:
+                raise Fail(f"--add-voice: voice.json names timbre_reference {timbre!r}, which isn't in {src.name}")
             refs = [n for n in files if n.lower().startswith("reference.") and n.lower().endswith(AUDIO_EXTS)] \
-                or [n for n in files if n.lower().endswith(AUDIO_EXTS)]
+                or [n for n in files if n.lower().endswith(AUDIO_EXTS) and n != timbre]
             if len(refs) != 1:
                 raise Fail(f"--add-voice: {src.name} needs exactly one recording (reference.wav); found {len(refs)}")
             copy(refs[0], staging / ("reference" + Path(refs[0]).suffix.lower()))
@@ -1220,9 +1379,13 @@ def add_voice(name, src):
                 raise Fail(f"--add-voice: {src.name} has {len(models)} .safetensors files; a voice pack has one (t3.safetensors)")
             if models:
                 copy(models[0], staging / "t3.safetensors")
-            if "voice.json" in files:
-                settings = json.loads(copy("voice.json", staging / "voice.json").read_text(encoding="utf-8"))
+            if settings:
                 keep = {k: float(settings[k]) for k in ("exaggeration", "cfg_weight", "temperature") if k in settings}
+                if timbre:
+                    if not timbre.lower().endswith(AUDIO_EXTS):
+                        raise Fail(f"--add-voice: timbre_reference {timbre!r} isn't a recording (.wav, .flac, .mp3)")
+                    keep["timbre_reference"] = "timbre_reference" + Path(timbre).suffix.lower()
+                    copy(timbre, staging / keep["timbre_reference"])
                 (staging / "voice.json").write_text(json.dumps(keep, indent=2), encoding="utf-8")
             if z is not None:
                 z.close()
@@ -1294,6 +1457,45 @@ def trim_edges(audio, margin=0.05):
     return audio[max(0, loud[0] * frame - keep):min(len(audio), (loud[-1] + 1) * frame + keep)]
 
 
+def fade_edges(audio, seconds=0.01):
+    """Short fades in and out, so a clip neither starts nor stops on a click."""
+    import numpy as np
+    n = min(int(seconds * SAMPLE_RATE), len(audio) // 2)
+    if not n:
+        return audio
+    audio = audio.copy()
+    ramp = np.linspace(0.0, 1.0, n, dtype=np.float32)
+    audio[:n] *= ramp
+    audio[-n:] *= ramp[::-1]
+    return audio
+
+
+def noise_floor(audio):
+    """A clip's background level in dBFS: the quiet 10% of its 20 ms frames, ignoring digital silence."""
+    import numpy as np
+    frame = int(SAMPLE_RATE * 0.02)
+    n = len(audio) // frame
+    if n < 10:
+        return None
+    rms = np.sqrt((audio[:n * frame].reshape(n, frame) ** 2).mean(axis=1))
+    rms = rms[rms > 1e-6]
+    if len(rms) < 10:
+        return None
+    return float(20 * np.log10(np.percentile(rms, 10)))
+
+
+def room_tone(n, floor_db, seed=7):
+    """n samples of soft, steady background noise at floor_db (clamped to -70...-45 dBFS), so
+    the gaps between sentences sound like the same room instead of dead digital silence."""
+    import numpy as np
+    db = min(-45.0, max(-70.0, floor_db))
+    noise = np.random.default_rng(seed).standard_normal(n + 64).astype(np.float32)
+    kernel = np.hanning(33).astype(np.float32)            # a gentle low-pass: hiss, not static
+    noise = np.convolve(noise, kernel / kernel.sum(), mode="same")[32:32 + n]
+    rms = float(np.sqrt((noise ** 2).mean())) or 1.0
+    return noise * (10 ** (db / 20) / rms)
+
+
 class OwnVoice:
     """own_voice_worker.py, running in Chatterbox's environment for the length of a run."""
 
@@ -1301,6 +1503,7 @@ class OwnVoice:
         if not own_voice_ready():
             raise Fail("your own voice isn't set up yet. Run deck-narrator --install-own-voice "
                        "(or Settings > Set up in the app), then try again.")
+        upgrade_own_voice()
         log("Starting Chatterbox for your own voice...")
         flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if IS_WINDOWS else {}
         self.proc = subprocess.Popen(
@@ -1312,8 +1515,10 @@ class OwnVoice:
             raise Fail(f"Chatterbox didn't start: {hello.get('error', hello)}")
         if hello.get("sr") != SAMPLE_RATE:
             raise Fail(f"Chatterbox speaks at {hello.get('sr')} Hz; this version of deck-narrator expects {SAMPLE_RATE}")
-        log(f"Chatterbox is running on {hello.get('device')}.")
+        where = {"cuda": "the NVIDIA GPU", "mps": "the Apple Silicon GPU", "cpu": "the processor"}
+        log(f"Chatterbox is running on {where.get(hello.get('device'), hello.get('device'))}.")
         self.loaded = None
+        self.floors = []                       # each clip's noise floor (dBFS), for the room tone
         self.tmp = Path(tempfile.mkdtemp(prefix="deck-narrator-own-"))
 
     def reply(self):
@@ -1344,11 +1549,17 @@ class OwnVoice:
         import soundfile as sf
         self.load(voice)
         out = self.tmp / "say.wav"
-        self.ask(cmd="say", text=text, seed=text_seed(voice, text), out=str(out))
+        r = self.ask(cmd="say", text=text, seed=text_seed(voice, text), out=str(out))
+        if r.get("tries", 1) > 1:
+            log(f"Your voice: said again ({r['tries']} tries) because the first one was cut short.")
         audio, sr = sf.read(str(out), dtype="float32")
         if audio.ndim > 1:
             audio = audio.mean(axis=1)
-        return trim_edges(np.ascontiguousarray(audio, dtype=np.float32))
+        audio = np.ascontiguousarray(audio, dtype=np.float32)
+        floor = noise_floor(audio)
+        if floor is not None:
+            self.floors.append(floor)
+        return fade_edges(trim_edges(audio))
 
     def close(self):
         try:
@@ -1410,8 +1621,9 @@ def ffconcat_path(path):
     return "'" + Path(path).resolve().as_posix().replace("'", "'\\''") + "'"
 
 
-def assemble(segments, tmp, out_path):
-    """segments: list of (png_path, audio ndarray, duration_seconds)."""
+def assemble(segments, tmp, out_path, floor=None):
+    """segments: list of (png_path, audio ndarray, duration_seconds). floor: your own voice's
+    noise floor in dBFS, when it spoke, for a room-tone bed under the whole track."""
     import numpy as np
     import soundfile as sf
     ffmpeg = find_ffmpeg()
@@ -1429,6 +1641,8 @@ def assemble(segments, tmp, out_path):
         concat += [f"file {ffconcat_path(png)}", f"duration {dur:.6f}"]
         t += dur
     concat.append(f"file {ffconcat_path(segments[-1][0])}")   # concat demuxer needs the last file repeated
+    if floor is not None and len(track):
+        track += room_tone(len(track), floor)
     wav = tmp / "narration.wav"
     sf.write(wav, track, SAMPLE_RATE, subtype="PCM_16")
     (tmp / "slides.ffconcat").write_text("\n".join(concat) + "\n", encoding="utf-8")   # ffmpeg reads UTF-8
@@ -1626,12 +1840,15 @@ def pronunciation_issues(slides):
                         continue
                     if tk.phonemes and all(ps != tk.phonemes for ps, _ in options):
                         options.insert(0, (tk.phonemes, "what it says now"))
+                    # The way it's said now is the sentence as it stands, so every word in one
+                    # sentence shares that clip (and its saved copy) instead of making its own.
                     issues.append({
                         "slide": s["number"], "word": word, "n": counts[key], "n_in_sentence": in_sentence[key],
                         "kind": kind,
                         "voice": part["voice"], "sentence": sentence, "current": tk.phonemes or "",
                         "options": [{"phonemes": ps, "label": label,
-                                     "say": with_override(sentence, word, in_sentence[key], ps)}
+                                     "say": sentence if ps == tk.phonemes else
+                                     with_override(sentence, word, in_sentence[key], ps)}
                                     for ps, label in options],
                     })
     return issues
@@ -1729,7 +1946,24 @@ def sample_cache_dirs():
         user = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "deck-narrator" / "samples"
     else:
         user = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "deck-narrator" / "samples"
-    return [app_dir() / "samples", user]
+    return [app_dir() / "samples", user / "kept", user]
+
+
+def keep_sample(name):
+    """Move a saved sample out of the rotating cache into kept/, which is never trimmed: the
+    clip of a pronunciation someone chose with Use this. Returns True if it was there."""
+    user = sample_cache_dirs()[-1]
+    src, dest = user / name, user / "kept" / name
+    if dest.is_file():
+        return True
+    if not src.is_file():
+        return False
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(src, dest)
+    except OSError:
+        return False
+    return True
 
 
 def sample_key(voice, text, speed):
@@ -1740,7 +1974,7 @@ def sample_key(voice, text, speed):
     updated = user_voice_dir() / f"{voice}.pt"
     voice_id = sha256_file(updated) if updated.is_file() else voice
     if is_own_voice(voice):                 # what makes it sound the way it does: its files
-        voice_id = [CHATTERBOX] + [[p.name, sha256_file(p) if p.stat().st_size < 50_000_000 else p.stat().st_size,
+        voice_id = [CHATTERBOX, OWN_ENGINE] + [[p.name, sha256_file(p) if p.stat().st_size < 50_000_000 else p.stat().st_size,
                                     int(p.stat().st_mtime)] for p in sorted(own_voices()[voice].iterdir()) if p.is_file()]
     blob = json.dumps([REPO_ID, voice, voice_id, round(float(speed), 3), text], ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:32]
@@ -1773,9 +2007,10 @@ def speak_sample(args):
             except OSError:
                 pass
             log(f"Sample: {args.voice}, from the saved copy")
+            log(f"Sample saved as {name}")
             print(out)
             return 0
-    tts = TTS(resolve_device(args.device))
+    tts = TTS(args.device)
     try:
         audio = tts.synthesize(args.voice, text, args.speed)
     finally:
@@ -1789,6 +2024,7 @@ def speak_sample(args):
         os.replace(cache / (name + ".part"), cache / name)
         for old in sorted(cache.glob("*.wav"), key=lambda f: f.stat().st_mtime)[:-SAMPLE_CACHE_MAX]:
             old.unlink()
+        log(f"Sample saved as {name}")
     except OSError:
         pass
     print(out)
@@ -1803,6 +2039,8 @@ def main(argv=None):
         return add_voice(*args.add_voice)
     if args.remove_voice:
         return remove_voice(args.remove_voice)
+    if args.remove_own_voice_support:
+        return remove_own_voice_support()
     if args.list_voices:
         list_voices()
         return 0
@@ -1913,7 +2151,11 @@ def main(argv=None):
         pngs = render_states(deck_path, tmp, slides, visible, renderer)
         audio_of = {}
         if with_notes:
-            tts = TTS(resolve_device(args.device))
+            tts = TTS(args.device)
+            tts.own_total = sum(own_chunks(p["text"]) for s in visible for p in s["parts"] if is_own_voice(p["voice"]))
+            if tts.own_total:
+                log(f"Your own voice speaks {tts.own_total} sentences in this deck. Without an NVIDIA graphics card "
+                    "that can take several minutes per slide.")
             for v in voices:                    # every voice loads before any long work
                 first = next(s["number"] for s in visible for p in s["parts"] if p["voice"] == v)
                 tts.pipe(v, f"slide {first}")
@@ -1954,7 +2196,7 @@ def main(argv=None):
             })
         (tmp / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
-        total = assemble(segments, tmp, out_path)
+        total = assemble(segments, tmp, out_path, tts.floor if tts is not None else None)
         log(f"Done: {out_path} ({total:.2f}s) in {time.time() - started:.0f}s")
         print(out_path)
     finally:

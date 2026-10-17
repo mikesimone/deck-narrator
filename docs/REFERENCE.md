@@ -84,11 +84,12 @@ Steps 1 and 2 take seconds and render nothing.
 | `--check-pronunciation` | | List the words in the selected slides' notes that may be said wrong (more than one pronunciation, not in the dictionary, or an all-capitals word spelled out), with each word's sentence and choices, and exit. No video. `--json` prints it as JSON (the GUI uses that) |
 | `--fix-word SLIDE WORD N PHONEMES` | | Write `[WORD](/PHONEMES/)` in place of the `N`th `WORD` in slide `SLIDE`'s notes and save the deck. The first time, the original is kept as `<deck> (before deck-narrator).pptx`. `N` counts every whole-word `WORD` in that slide's notes, fixed or not, case ignored |
 | `--sample TEXT` | | Speak `TEXT` into a WAV with `--voice`, `--speed` and `--pronunciations`, print its path and exit. `-o` names the `.wav` (default: `deck-narrator-sample.wav` in the temp folder). Doesn't need a deck. The GUI's **Play sample** uses this. Samples are saved (see [The GUI](GUIDE.md#the-gui)), so the same one again is instant |
-| `--device auto\|cuda\|mps\|cpu` | `auto` | Where Kokoro runs. `auto` uses CUDA when torch can see an NVIDIA GPU, the Mac's GPU (`mps`) on Apple Silicon, else the CPU |
+| `--device auto\|cuda\|mps\|cpu` | `auto` | Where the voices run. `auto` uses CUDA when torch can see an NVIDIA GPU, the Mac's GPU (`mps`) on Apple Silicon, else the CPU. Kokoro and your own voice each decide with their own PyTorch: the Windows installer and zip carry a CPU-only one for Kokoro (quick enough), while your own voice's setup gets the NVIDIA build when there's a card, so `auto` puts it on the GPU |
 | `--renderer auto\|powerpoint\|keynote\|libreoffice` | `auto` | What draws the slides. `auto` uses Microsoft PowerPoint when it's installed (Windows), Keynote on a Mac, else LibreOffice |
 | `--install-own-voice` | | Set up Chatterbox for [your own voice](OWN-VOICE.md) (4 to 6 GB, once; run again to repair), print `own-voice: ready`, and exit |
 | `--add-voice NAME FILE` | | Make your own voice `NAME` from `FILE`: a 10-30 second recording (`.wav`, `.flac`, `.mp3`, `.ogg`) or a [voice pack](OWN-VOICE.md#voice-packs) (`.zip` or folder). Replaces a voice of the same name. Prints `voice: NAME` and exits |
 | `--remove-voice NAME` | | Delete your own voice `NAME` and exit |
+| `--remove-own-voice-support` | | Delete Chatterbox, its Python and its model (4 to 6 GB) and exit. Your voices in `my-voices` are kept; `--install-own-voice` brings it back |
 | `--update-voices` | | Download voices that are new or updated on HuggingFace since the install, into a per-user folder, print one `voices: ...` line, and exit. Only for installs with bundled voices; others download voices on use anyway |
 | `--keep-temp` | off | Keep the temp dir (PNGs, PDF, WAV, `manifest.json`) and print its path |
 | `--version` | | Print the version and exit |
@@ -235,16 +236,26 @@ Python rather than sharing deck-narrator's:
   from PyPI, checked against its SHA-256), which installs Python 3.11 and a virtual
   environment with `chatterbox-tts` 0.1.7 and PyTorch 2.8 (CUDA 12.8 when `nvidia-smi` finds
   an NVIDIA GPU, else CPU; the standard build on a Mac), then downloads Chatterbox's model
-  from HuggingFace (`ResembleAI/chatterbox`) into that folder. Nothing goes into
-  deck-narrator's own install.
-- A voice is a folder in `my-voices`: `reference.*`, plus `t3.safetensors` and `voice.json`
-  when it came from a voice pack. Names are `[a-z0-9][a-z0-9_-]{0,31}`, and can't look like
+  from HuggingFace (`ResembleAI/chatterbox`) into that folder, plus faster-whisper and its
+  `base.en` model (about 200 MB, for the cut-off check below). It asks for 10 GB free first.
+  `ready.json` in that folder records the versions and whether its PyTorch sees an NVIDIA
+  or Apple GPU (Settings shows it). Nothing goes into deck-narrator's own install. A setup
+  made by 1.3.0 gets faster-whisper added on its first use.
+- A voice is a folder in `my-voices`: `reference.*`, plus `t3.safetensors`, `voice.json`
+  and `timbre_reference.*` when it came from a voice pack. Names are `[a-z0-9][a-z0-9_-]{0,31}`, and can't look like
   a Kokoro name (`af_...`) or be `default`.
 - During a run, `own_voice_worker.py` runs in that Python (offline, `HF_HUB_OFFLINE=1`) and
-  speaks each chunk of notes on request (one JSON line each way). `--device` applies to it
-  too. Each chunk is seeded from the voice and the text, so it comes out the same every
-  time; leading and trailing silence is trimmed, and its 24 kHz audio joins the rest like a
-  Kokoro voice's.
+  speaks each chunk of notes on request (one JSON line each way). `--device` goes to it as
+  given and its own PyTorch resolves it. Notes are spoken in chunks of up to 200 characters
+  (Kokoro's are 350), with a progress line and a time estimate for each.
+- Each chunk is seeded from the voice and the text, so it comes out the same every time.
+  Three of Chatterbox's silence tokens go before the vocoder (as Chatterbox Turbo does), so
+  the last sound isn't clipped. faster-whisper (`base.en`, on the CPU) then transcribes the
+  clip; if the last word or much of the text is missing, it's spoken again with the next
+  seed, up to 3 tries, keeping the best. Retries are logged and are just as repeatable.
+- Clips are trimmed, faded in and out (10 ms), and the gaps between them get a quiet room
+  tone at the clips' own background level (clamped to -70 to -45 dBFS) instead of digital
+  silence, so the joins don't sound like the audio switching off.
 - Phoneme overrides are read as the plain word, and `--speed` is ignored for these voices
   (the log says so). `--show-phonemes` and `--phonemes` show the words instead.
 - It's much heavier than Kokoro: about 3 to 5 GB of VRAM on an NVIDIA GPU, and slow on a CPU.

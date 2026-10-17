@@ -46,6 +46,7 @@ COVERED = {
     "renderer",        # Settings: "Draw slides with"
     "add_word",        # Check pronunciation: Use this on a word the dictionary lacks
     "install_own_voice", "add_voice", "remove_voice",   # Settings: Your own voice
+    "remove_own_voice_support",                         # Settings: Your own voice > Remove Chatterbox
     "help", "version",
 }
 
@@ -196,11 +197,14 @@ def build_args(f, mode):
     """Form values (a dict) -> CLI arguments for one action. Pure, so it's testable.
 
     mode: "video", "builds", "check" (pronunciation), "phonemes" (whole deck), "phonemes_text", "sample",
-    and for your own voice "install_own_voice", "add_voice" (own_voice_name, own_voice_file), "remove_voice".
+    and for your own voice "install_own_voice", "add_voice" (own_voice_name, own_voice_file), "remove_voice",
+    "remove_own_voice_support".
     Raises ValueError with a user-facing message when something required is missing.
     """
     if mode == "install_own_voice":
         return ["--install-own-voice"]
+    if mode == "remove_own_voice_support":
+        return ["--remove-own-voice-support"]
     if mode == "add_voice":
         name = f.get("own_voice_name", "").strip().lower()
         if not narrate.OWN_NAME.fullmatch(name) or narrate.is_kokoro_name(name) or name == "default":
@@ -327,9 +331,10 @@ class Job:
         self.lines = queue.Queue()
         self.on_line, self.on_done = on_line, on_done
         flags = subprocess.CREATE_NO_WINDOW if IS_WINDOWS else 0
-        self.proc = subprocess.Popen(
+        self.proc = subprocess.Popen(           # its own process group, so Stop reaches Chatterbox and ffmpeg too
             argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace", bufsize=1, env=env, creationflags=flags)
+            text=True, encoding="utf-8", errors="replace", bufsize=1, env=env, creationflags=flags,
+            start_new_session=not IS_WINDOWS)
         self.cancelled = False
         threading.Thread(target=self._read, daemon=True).start()
 
@@ -359,7 +364,11 @@ class Job:
             subprocess.run(["taskkill", "/T", "/F", "/PID", str(self.proc.pid)],
                            capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
         else:
-            self.proc.terminate()
+            import signal
+            try:
+                os.killpg(self.proc.pid, signal.SIGTERM)
+            except OSError:
+                self.proc.terminate()
 
 
 UNOVERRIDE = re.compile(r"\[([^\[\]]*)\]\([^)]*\)")    # [word](/phonemes/) -> word, for showing a sentence
@@ -391,6 +400,7 @@ class PronunciationReview:
         self.app, self.issues, self.deck = app, issues, deck
         self.job = None
         self.wav = Path(tempfile.gettempdir()) / "deck-narrator-review.wav"
+        self.clips = {}         # (voice, text) -> the saved sample's name, kept once Use this picks it
         c = app.colors
         w = self.win = tk.Toplevel(app.root)
         w.title(f"{TITLE}: check pronunciation")
@@ -518,6 +528,9 @@ class PronunciationReview:
 
     def play(self, issue, text):
         def done(out):
+            name = next((l.split(" saved as ", 1)[1].strip() for l in out if l.startswith("Sample saved as ")), None)
+            if name:
+                self.clips[(issue["voice"], text)] = name
             try:
                 play_wav(self.wav)
                 self.status.configure(text="Playing.")
@@ -526,7 +539,15 @@ class PronunciationReview:
         self.run(["--voice", issue["voice"], "--speed", self.app.v["speed"].get(), "--sample", text,
                   "-o", str(self.wav)], done, "Making the sample...")
 
+    def keep_clip(self, issue, phonemes):
+        """The clip played for the chosen way of saying it stays saved for good."""
+        say = next((o["say"] for o in issue["options"] if o["phonemes"] == phonemes), None)
+        name = self.clips.get((issue["voice"], say))
+        if name:
+            narrate.keep_sample(name)
+
     def use(self, iid, issue, phonemes):
+        self.keep_clip(issue, phonemes)
         if issue["kind"] in self.TO_DICTIONARY:
             self.add_to_dictionary(issue, phonemes)
             return
@@ -838,7 +859,9 @@ class App:
         ttk.Label(engine, text="Run voice on").grid(row=1, column=0, sticky="w", **pad)
         ttk.Combobox(engine, textvariable=self.v["device"], state="readonly", width=12,
                      values=["auto", "cuda", "mps", "cpu"]).grid(row=1, column=1, sticky="w", **pad)
-        ttk.Label(engine, text="auto = NVIDIA GPU or Apple Silicon if there is one", style="Hint.TLabel").grid(row=1, column=2, sticky="w", **pad)
+        ttk.Label(engine, text="auto = the fastest there is. Your own voice uses an NVIDIA GPU or\nApple Silicon; "
+                               "the built-in voices are quick on the processor", style="Hint.TLabel",
+                  justify="left").grid(row=1, column=2, sticky="w", **pad)
 
         own = section(3, "Your own voice")
         own.columnconfigure(1, weight=1)
@@ -850,6 +873,8 @@ class App:
         self.own_pick = ttk.Combobox(own, state="readonly", width=18)
         self.own_pick.grid(row=1, column=1, sticky="e", **pad)
         ttk.Button(own, text="Remove", command=self.remove_own_voice).grid(row=1, column=2, sticky="e", **pad)
+        self.own_drop_btn = ttk.Button(own, text="Remove Chatterbox...", command=self.remove_own_voice_support)
+        self.own_drop_btn.grid(row=3, column=2, sticky="e", **pad)
         ttk.Label(own, text="Narrate in a real person's voice, using Chatterbox. A voice is a clear 10-30 second "
                             "recording of them talking, or a voice pack (.zip). It runs best on an NVIDIA GPU or "
                             "Apple Silicon; on a plain processor it's slow. Only use voices you have permission to use.",
@@ -880,10 +905,19 @@ class App:
             return
         ready = narrate.own_voice_ready()
         voices = sorted(narrate.own_voices())
-        self.own_status.configure(text=(
-            ("Set up." if ready else "Not set up yet. Setting up downloads 4 to 6 GB, once.")
-            + (f" Your voices: {', '.join(voices)}." if voices else " No voices of your own yet.")))
+        where = narrate.own_voice_where() if ready else ""
+        if not ready:
+            state = "Not set up yet. Setting up downloads 4 to 6 GB, once."
+        elif where == "processor":
+            state = "Set up. It runs on the processor (no NVIDIA graphics card found), so it's slow."
+        elif where:
+            state = f"Set up. It runs on the {where}."
+        else:
+            state = "Set up."
+        self.own_status.configure(text=state + (f" Your voices: {', '.join(voices)}." if voices else
+                                                " No voices of your own yet."))
         self.own_setup_btn.configure(text="Repair" if ready else "Set up")
+        self.own_drop_btn.configure(state="normal" if narrate.own_voice_home().exists() else "disabled")
         self.own_pick.configure(values=voices)
         if self.own_pick.get() not in voices:
             self.own_pick.set(voices[0] if voices else "")
@@ -920,6 +954,11 @@ class App:
         if name and messagebox.askyesno(TITLE, f"Delete your voice {name!r}? Its files are removed from this computer."):
             self.pending_own = {"own_voice_name": name}
             self.run("remove_voice")
+
+    def remove_own_voice_support(self):
+        if messagebox.askyesno(TITLE, "Remove Chatterbox?\n\nThis deletes its download (4 to 6 GB) from this "
+                                      "computer. Your voices are kept, and Set up brings it all back."):
+            self.run("remove_own_voice_support")
 
     def open_tip_jar(self):
         import webbrowser
@@ -1290,7 +1329,7 @@ class App:
         self.mode = mode
         self.out_lines = []
         self.clear_log()
-        if mode not in ("sample", "add_voice", "remove_voice"):
+        if mode not in ("sample", "add_voice", "remove_voice", "remove_own_voice_support"):
             self.tabs.select(self.log_tab)
         self.append("> deck-narrator " + " ".join(shlex.quote(a) for a in args))
         self.progress.configure(mode="indeterminate")
@@ -1298,6 +1337,7 @@ class App:
         self.status.configure(text={"video": "Making the video...", "sample": "Synthesizing the sample...",
                                     "install_own_voice": "Setting up your own voice (a large download)...",
                                     "add_voice": "Adding the voice...", "remove_voice": "Removing the voice...",
+                                    "remove_own_voice_support": "Removing Chatterbox...",
                                     "builds": "Reading the deck's animations...", "check": "Checking pronunciation..."}.get(mode, "Working..."))
         self.cancel_btn.configure(state="normal")
         self.make_btn.configure(state="disabled")
@@ -1328,7 +1368,7 @@ class App:
             self.status.configure(text=line)
         elif line.startswith(("Loading Kokoro", "Measuring loudness", "Encoding", "Starting Chatterbox",
                               "Chatterbox is running", "Making a Python", "Installing Chatterbox",
-                              "Downloading the")):
+                              "Downloading the", "Your voice: ", "Updating your own voice")):
             self.status.configure(text=line)
 
     def on_done(self, code, cancelled):
@@ -1339,7 +1379,7 @@ class App:
         self.make_btn.configure(state="normal")
         self.sample_btn.configure(state="normal")
         self.pending_own = None
-        if self.mode in ("install_own_voice", "add_voice", "remove_voice"):
+        if self.mode in ("install_own_voice", "add_voice", "remove_voice", "remove_own_voice_support"):
             self.refresh_voices()
         if cancelled:
             self.status.configure(text="Cancelled.")
@@ -1368,7 +1408,9 @@ class App:
             name = next((l.split(":", 1)[1].strip() for l in self.out_lines if l.startswith("voice: ")), "")
             if name:
                 self.v["voice"].set(voice_label(name))
-            self.status.configure(text=f"Voice {name} added and chosen. Try it with Play sample." if name else "Done.")
+            self.status.configure(text=f"Voice {name} added and chosen." if name else "Done.")
+            if name and narrate.own_voice_ready():      # make its sample now; it's saved, so Play sample is instant later
+                self.root.after(200, lambda: self.job is None and self.run("sample"))
         elif self.mode == "sample":
             self.status.configure(text="Playing the sample.")
             try:
