@@ -13,9 +13,11 @@ object per line:
 
 A voice folder holds reference.* (a 10-30 second recording of the speaker), and may hold
 t3.safetensors (a fine-tuned T3, the part that learns rhythm and phrasing) and voice.json
-({"exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8, "timbre_reference":
-"timbre_reference.wav"}). A timbre reference, when there is one, sets how the voice sounds
-(the vocoder) while reference.* still sets how it speaks (T3).
+({"exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8, "pause_scale": 1.0,
+"speed": 1.0, "timbre_reference": "timbre_reference.wav"}). A timbre reference, when there
+is one, sets how the voice sounds (the vocoder) while reference.* still sets how it speaks
+(T3). pause_scale lengthens the pauses inside each clip (here); speed slows or speeds the
+whole clip without changing the pitch (deck-narrator does that, with ffmpeg).
 
 Chatterbox sometimes stops a word or two early. When faster-whisper is installed, each
 clip is transcribed and, if its last word or a chunk of the text is missing, spoken again
@@ -33,7 +35,7 @@ import re
 import sys
 from pathlib import Path
 
-DEFAULTS = {"exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8}
+DEFAULTS = {"exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8, "pause_scale": 1.0, "speed": 1.0}
 AUDIO = (".wav", ".flac", ".mp3", ".ogg")
 WHISPER = "base.en"         # faster-whisper model for the cut-off check (about 145 MB)
 MAX_TRIES = 3               # seeds tried per clip before keeping the best one
@@ -103,6 +105,44 @@ def heard_ok(expected, heard):
         last_ok = any(difflib.SequenceMatcher(None, last, w).ratio() >= 0.75 for w in got[-3:])
     ok = last_ok and coverage >= 0.7 and len(got) <= high
     return ok, (last_ok, coverage if len(got) <= high else 0.5 * coverage)
+
+
+def extend_pauses(x, sr, factor, min_pause=0.12, max_added=0.35, quiet_db=-35):
+    """Lengthen the pauses inside a clip (runs of at least min_pause, quiet_db below its peak)
+    by factor, at most max_added seconds each, by repeating the pause's own quiet audio so
+    the background stays continuous. Leading and trailing silence is left alone."""
+    import numpy as np
+    hop = int(sr * 0.01)
+    if factor <= 1.0 or len(x) < hop * 10:
+        return x
+    n = len(x) // hop
+    env = np.sqrt((x[:n * hop].reshape(n, hop) ** 2).mean(axis=1))
+    quiet = 20 * np.log10(env / (env.max() + 1e-9) + 1e-12) < quiet_db
+    loud = np.nonzero(~quiet)[0]
+    if len(loud) < 2:
+        return x
+    out, last, i = [], 0, loud[0]
+    while i <= loud[-1]:
+        if not quiet[i]:
+            i += 1
+            continue
+        j = i
+        while j <= loud[-1] and quiet[j]:
+            j += 1
+        dur = (j - i) * hop / sr
+        if dur >= min_pause:
+            a, b = i * hop, j * hop
+            mid = (a + b) // 2
+            pad = np.resize(x[a:b], int(min(dur * (factor - 1), max_added) * sr)).astype("float32")
+            k = min(int(sr * 0.005), len(pad) // 2)
+            if k:
+                pad[:k] *= np.linspace(0, 1, k, dtype="float32")
+                pad[-k:] *= np.linspace(1, 0, k, dtype="float32")
+            out += [x[last:mid], pad]
+            last = mid
+        i = j
+    out.append(x[last:])
+    return np.concatenate(out)
 
 
 def pick_device(choice):
@@ -232,6 +272,7 @@ class Speaker:
             if best is None or score > best[0]:
                 best = (score, audio, k + 1)
         _, audio, tries = best
+        audio = extend_pauses(audio, self.model.sr, s["pause_scale"])
         sf.write(out, audio, self.model.sr, subtype="FLOAT")
         return len(audio) / self.model.sr, tries
 

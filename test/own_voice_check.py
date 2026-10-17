@@ -114,7 +114,8 @@ def main():
     with zipfile.ZipFile(pack, "w") as z:
         z.write(ref, "reference.wav")
         z.write(timbre, "timbre_reference.wav")
-        z.writestr("voice.json", json.dumps({"timbre_reference": "timbre_reference.wav", "cfg_weight": 0.3}))
+        z.writestr("voice.json", json.dumps({"timbre_reference": "timbre_reference.wav", "cfg_weight": 0.3,
+                                            "pause_scale": 1.6, "speed": 0.95}))
     run("--add-voice", "ci-pack", pack)
     run("--voice", "ci-pack", "--sample", SAY, "-o", work / "pack.wav", timeout=1800)
     assert sf.info(str(work / "pack.wav")).duration > 1.5, "the voice pack said nothing"
