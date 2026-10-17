@@ -9,10 +9,11 @@ It's optional and a separate download (4 to 6 GB, once), so it isn't part of the
 > **Warning: it's painfully slow without an NVIDIA graphics card.** On a regular processor
 > (no NVIDIA card, or a Mac), your own voice can take **several minutes per slide**, and a
 > full deck can take hours. The built-in voices take seconds. If your PC has no NVIDIA card,
-> try one slide before you start a whole deck.
+> try one slide before you start a whole deck. **Settings > Your own voice** says which it
+> uses, and the log counts down the sentences while it works.
 >
-> **Windows, version 1.3.0:** a bug makes your own voice run on the processor even when there
-> *is* an NVIDIA card. The next version fixes it.
+> **Upgrading from 1.3.0?** 1.3.0 used the processor even when there was an NVIDIA card.
+> 1.3.1 fixes that, and adds a small download (about 200 MB) the first time you use your voice.
 
 ## Contents
 
@@ -61,6 +62,10 @@ The voice now shows in the **Voice** list at the top, marked **(your own voice)*
 
 - **It's much slower than the built-in voices.** With an NVIDIA graphics card it keeps up. On
   a processor alone, or a Mac, expect several minutes per slide (see the warning at the top).
+  The log shows each sentence as it's done and about how long is left. **Stop** stops it.
+- **It checks itself.** Chatterbox sometimes stops a word early. Each sentence is listened
+  to as it's made, and one that was cut short is made again (the log says so).
+- **Its sample is made when you add it,** and kept, so **Play sample** is instant after that.
 - **The same notes always sound the same.** Make the video again and each sentence comes out
   exactly as before, so changing one slide doesn't change the others.
 - **Speed doesn't apply.** The **Speed** setting is for the built-in voices only. Your voice
@@ -73,10 +78,12 @@ The voice now shows in the **Voice** list at the top, marked **(your own voice)*
   it. Chatterbox puts an inaudible watermark in the audio it makes, so it can be identified
   as AI-made.
 - **Removing a voice:** **Settings** > **Your own voice**, pick it, click **Remove**.
+- **Removing Chatterbox:** **Remove Chatterbox...** in the same place deletes its 4 to 6 GB.
+  Your voices are kept, and **Set up** brings it back.
 - **Where it lives:** Chatterbox goes in `%LOCALAPPDATA%\deck-narrator\chatterbox` on
   Windows (`~/.local/share/deck-narrator/chatterbox` on Mac and Linux), and your voices in
-  `my-voices` next to it. Uninstalling Deck Narrator leaves them; delete those folders to
-  free the space.
+  `my-voices` next to it. Uninstalling Deck Narrator leaves them: use **Remove Chatterbox...**
+  first, or delete those folders.
 
 ## Voice packs
 
@@ -87,7 +94,8 @@ Make a `.zip` (or a folder) with:
 |---|---|
 | `reference.wav` (or `.flac`, `.mp3`) | Required. 10 to 30 seconds of the person |
 | `t3.safetensors` | Optional. Your fine-tuned T3 weights (Chatterbox 0.1.7's T3, same shape; `t3.` or `module.` prefixes are fine) |
-| `voice.json` | Optional. `{"exaggeration": 0.5, "cfg_weight": 0.3, "temperature": 0.8}`; anything left out uses Chatterbox's default |
+| `voice.json` | Optional. `{"exaggeration": 0.5, "cfg_weight": 0.3, "temperature": 0.8}`; anything left out uses Chatterbox's default. Add `"timbre_reference": "clean.wav"` to use a second recording for the sound of the voice |
+| the timbre recording | Optional, named in `voice.json`. A clean, quiet recording that sets how the voice *sounds*, while `reference.wav` still sets how it *speaks*. Useful when the recording that matches your delivery has room noise |
 
 Then add it like a recording: **Add a voice...** and pick the `.zip`. Lower `cfg_weight` and
 `exaggeration` make the voice slower and calmer.
@@ -100,6 +108,7 @@ deck-narrator --add-voice mike recording.wav       add a voice (or a voice pack 
 deck-narrator --list-voices                        your voices are listed first
 deck-narrator deck.pptx --voice mike               narrate with it
 deck-narrator --remove-voice mike                  delete it
+deck-narrator --remove-own-voice-support           delete Chatterbox (keeps your voices)
 ```
 
 `DECK_NARRATOR_TORCH_BACKEND` (`cpu`, `cu128`, ...) picks which PyTorch the setup installs,

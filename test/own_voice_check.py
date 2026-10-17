@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end check of "your own voice" with the real Chatterbox: set it up, make a voice
-from a recording, speak with it, narrate a slide with it, remove it. Downloads 4 to 6 GB.
+from a recording, speak with it, narrate a slide with it, a voice pack with a timbre
+recording, the update of a 1.3.0 setup, removing it all. Downloads 4 to 6 GB.
 CI runs it on Linux (from source) and Windows (the built .exe), on the CPU.
 
   python test/own_voice_check.py [--exe path/to/deck-narrator] [--skip-install]
@@ -8,7 +9,9 @@ CI runs it on Linux (from source) and Windows (the built .exe), on the CPU.
 Checks the words with faster-whisper when it's installed.
 """
 import argparse
+import json
 import os
+import zipfile
 import subprocess
 import sys
 import tempfile
@@ -57,6 +60,12 @@ def main():
 
     if not args.skip_install:
         run("--install-own-voice", timeout=5400)
+    home = Path(os.environ.get("DECK_NARRATOR_OWN_VOICE_HOME") or
+                (Path(os.environ["LOCALAPPDATA"]) if os.name == "nt" else Path.home() / ".local" / "share")
+                / "deck-narrator" / "chatterbox")
+    ready = json.loads((home / "ready.json").read_text(encoding="utf-8"))
+    print(f"ready.json: {ready}")
+    assert ready.get("checker") and "cuda" in ready, "the setup didn't record the checker and the GPU"
 
     ref = work / "reference.wav"
     run("--voice", "am_michael", "--sample", REFERENCE, "-o", ref)
@@ -73,6 +82,9 @@ def main():
     assert sr == 24000 and 1.5 < seconds < 12, "the own-voice sample has the wrong length"
     again = run("--voice", "ci-voice", "--sample", SAY, "-o", work / "again.wav")
     assert "saved copy" in again.stderr, "the second identical sample wasn't served from the cache"
+    first = run("--voice", "ci-voice", "--sample", "One more line, to check the logs.", "-o", work / "log.wav")
+    assert "cut-off check isn't installed" not in first.stderr, "the cut-off check didn't load"
+    assert "running on the processor" in first.stderr, first.stderr[-2000:]
 
     try:
         from faster_whisper import WhisperModel
@@ -95,8 +107,30 @@ def main():
     run(deck, "--voice", "ci-voice", "--slides", "1", "-o", video, timeout=1800)
     assert video.is_file() and video.stat().st_size > 10_000, "no video"
 
+    # A voice pack whose timbre_reference sets the sound and reference.wav the delivery.
+    timbre = work / "timbre.wav"
+    run("--voice", "af_heart", "--sample", REFERENCE, "-o", timbre)
+    pack = work / "pack.zip"
+    with zipfile.ZipFile(pack, "w") as z:
+        z.write(ref, "reference.wav")
+        z.write(timbre, "timbre_reference.wav")
+        z.writestr("voice.json", json.dumps({"timbre_reference": "timbre_reference.wav", "cfg_weight": 0.3}))
+    run("--add-voice", "ci-pack", pack)
+    run("--voice", "ci-pack", "--sample", SAY, "-o", work / "pack.wav", timeout=1800)
+    assert sf.info(str(work / "pack.wav")).duration > 1.5, "the voice pack said nothing"
+
+    # A setup from 1.3.0 (no checker in ready.json) is brought up to date on first use.
+    old = {k: v for k, v in ready.items() if k not in ("checker", "cuda", "mps", "gpu")}
+    (home / "ready.json").write_text(json.dumps(old), encoding="utf-8")
+    up = run("--voice", "ci-voice", "--sample", "Updated, and still talking.", "-o", work / "up.wav", timeout=1800)
+    assert "Updating your own voice's setup" in up.stderr, "a 1.3.0 setup wasn't updated"
+    assert json.loads((home / "ready.json").read_text(encoding="utf-8")).get("checker"), "ready.json not updated"
+
     run("--remove-voice", "ci-voice")
+    run("--remove-voice", "ci-pack")
     assert "ci-voice" not in run("--list-voices").stdout
+    run("--remove-own-voice-support")
+    assert not home.exists(), "Chatterbox wasn't removed"
     print("own voice: OK")
 
 

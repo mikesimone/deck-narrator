@@ -62,8 +62,10 @@ sounds right (`op swat`) under **Sounds like**, then **Play** or **Use this**. (
 **Pronunciation** tab.)
 
 **Play sample** is instant for the default sentence in every English voice: the Windows
-builds come with those recorded. Any other sample is saved after it's made the first time
-(the newest 200 are kept), so playing it again is instant too.
+and Mac builds come with those recorded. Any other sample is saved after it's made the
+first time (the newest 200 are kept), so playing it again is instant too. In **Check
+pronunciation**, the way a sentence is said now is one clip, shared by every word listed in
+that sentence, and the clip of the way you picked with **Use this** is kept for good.
 
 **Updates:** with **Check for Deck Narrator updates at startup** on (in **Settings**;
 on by default), it asks GitHub once a day for the latest release. When there's a newer one,

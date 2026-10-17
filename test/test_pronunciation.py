@@ -93,7 +93,12 @@ class Issues(unittest.TestCase):
         self.assertIn(("Zscaler", 1, "unknown"), found)
         read2 = next(i for i in issues if i["word"] == "read" and i["n"] == 2)
         self.assertEqual(read2["sentence"], "Zscaler can read it too.")
-        self.assertTrue(all("[read](/" in o["say"] for o in read2["options"]))
+        for o in read2["options"]:     # the way it's said now is the plain sentence, shared by its words
+            self.assertEqual(o["say"] == read2["sentence"], o["phonemes"] == read2["current"])
+            if o["phonemes"] != read2["current"]:
+                self.assertIn("[read](/", o["say"])
+        zs = next(i for i in issues if i["word"] == "Zscaler")
+        self.assertEqual(zs["options"][0]["say"], zs["sentence"])
         self.assertGreaterEqual(len(read2["options"]), 2)
 
     def test_overrides_and_plain_words_are_left_alone(self):
