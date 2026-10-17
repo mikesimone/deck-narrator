@@ -6,6 +6,14 @@ a free voice model from Resemble AI that copies a voice from a short recording.
 
 It's optional and a separate download (4 to 6 GB, once), so it isn't part of the normal install.
 
+> **Warning: it's painfully slow without an NVIDIA graphics card.** On a regular processor
+> (no NVIDIA card, or a Mac), your own voice can take **several minutes per slide**, and a
+> full deck can take hours. The built-in voices take seconds. If your PC has no NVIDIA card,
+> try one slide before you start a whole deck.
+>
+> **Windows, version 1.3.0:** a bug makes your own voice run on the processor even when there
+> *is* an NVIDIA card. The next version fixes it.
+
 ## Contents
 
 - [Set it up](#set-it-up)
@@ -51,8 +59,8 @@ The voice now shows in the **Voice** list at the top, marked **(your own voice)*
 
 ## Good to know
 
-- **It's slower than the built-in voices.** With an NVIDIA graphics card it's quick. On a
-  PC without one, or a Mac, expect a few minutes per slide. Try one slide first.
+- **It's much slower than the built-in voices.** With an NVIDIA graphics card it keeps up. On
+  a processor alone, or a Mac, expect several minutes per slide (see the warning at the top).
 - **The same notes always sound the same.** Make the video again and each sentence comes out
   exactly as before, so changing one slide doesn't change the others.
 - **Speed doesn't apply.** The **Speed** setting is for the built-in voices only. Your voice
