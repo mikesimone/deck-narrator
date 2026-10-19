@@ -85,3 +85,8 @@ notes](AI-NOTES.md).
 
 Something else? [Open an issue](https://github.com/mikesimone/deck-narrator/issues) with a
 screenshot of the message.
+
+**Your own voice on a Mac is new and hasn't been tried on a real Mac yet.** If you set it
+up (see [Your own voice](OWN-VOICE.md)), please [open an issue](https://github.com/mikesimone/deck-narrator/issues)
+saying whether it worked, which Mac you have, and how long one slide took. If something
+failed, include the text from the **Log** tab.
