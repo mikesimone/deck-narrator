@@ -1375,9 +1375,14 @@ def add_voice(name, src):
             if len(refs) != 1:
                 raise Fail(f"--add-voice: {src.name} needs exactly one recording (reference.wav); found {len(refs)}")
             copy(refs[0], staging / ("reference" + Path(refs[0]).suffix.lower()))
-            models = [n for n in files if n.endswith(".safetensors")]
+            s3gen = Path(str(settings.get("s3gen") or "")).name or None
+            if s3gen and (s3gen not in files or not s3gen.endswith(".safetensors")):
+                raise Fail(f"--add-voice: voice.json names s3gen {s3gen!r}, which isn't a .safetensors file in {src.name}")
+            models = [n for n in files if n.endswith(".safetensors") and n != s3gen]
             if len(models) > 1:
-                raise Fail(f"--add-voice: {src.name} has {len(models)} .safetensors files; a voice pack has one (t3.safetensors)")
+                models = [n for n in models if n == "t3.safetensors"] or models
+            if len(models) > 1:
+                raise Fail(f"--add-voice: {src.name} has {len(models)} T3 .safetensors files; a voice pack has one (t3.safetensors)")
             if models:
                 copy(models[0], staging / "t3.safetensors")
             if settings:
@@ -1388,6 +1393,9 @@ def add_voice(name, src):
                         raise Fail(f"--add-voice: timbre_reference {timbre!r} isn't a recording (.wav, .flac, .mp3)")
                     keep["timbre_reference"] = "timbre_reference" + Path(timbre).suffix.lower()
                     copy(timbre, staging / keep["timbre_reference"])
+                if s3gen:
+                    keep["s3gen"] = "s3gen.safetensors"
+                    copy(s3gen, staging / "s3gen.safetensors")
                 (staging / "voice.json").write_text(json.dumps(keep, indent=2), encoding="utf-8")
             if z is not None:
                 z.close()
@@ -1413,7 +1421,7 @@ def add_voice(name, src):
         shutil.copytree(staging, dest)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
-    tuned = " with its fine-tuned model" if (dest / "t3.safetensors").is_file() else ""
+    tuned = " with its fine-tuned model" if any(dest.glob("*.safetensors")) else ""
     log(f"Voice {name!r} added{tuned} ({dest}). Use it with --voice {name} or [voice: {name}].")
     if not own_voice_ready():
         log("It speaks once your own voice is set up: --install-own-voice, or Settings > Set up.")

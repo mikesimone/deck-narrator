@@ -16,7 +16,8 @@ t3.safetensors (a fine-tuned T3, the part that learns rhythm and phrasing) and v
 ({"exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8, "pause_scale": 1.0,
 "speed": 1.0, "timbre_reference": "timbre_reference.wav"}). A timbre reference, when there
 is one, sets how the voice sounds (the vocoder) while reference.* still sets how it speaks
-(T3). pause_scale lengthens the pauses inside each clip (here); speed slows or speeds the
+(T3). "s3gen": "s3gen.safetensors" names fine-tuned S3Gen weights (the vocoder side), loaded
+over the stock ones like t3.safetensors. pause_scale lengthens the pauses inside each clip (here); speed slows or speeds the
 whole clip without changing the pitch (deck-narrator does that, with ffmpeg).
 
 Chatterbox sometimes stops a word or two early. When faster-whisper is installed, each
@@ -73,11 +74,23 @@ def settings_of(folder):
     return s
 
 
+def s3gen_of(folder):
+    """voice.json's s3gen, if it names a file in the voice folder."""
+    p = Path(folder) / "voice.json"
+    name = json.loads(p.read_text(encoding="utf-8")).get("s3gen") if p.is_file() else None
+    if not name:
+        return None
+    s = Path(folder) / Path(str(name)).name
+    if not s.is_file():
+        raise FileNotFoundError(f"voice.json names s3gen {name!r}, which isn't in {folder}")
+    return s
+
+
 def plain_state(state):
-    """A saved T3 state dict, without the prefixes training scripts tend to add."""
+    """A saved T3 or S3Gen state dict, without the prefixes training scripts tend to add."""
     if "model" in state and not hasattr(state["model"], "shape"):
         state = state["model"][0]
-    for prefix in ("module.", "t3."):
+    for prefix in ("module.", "t3.", "s3gen."):
         if state and all(k.startswith(prefix) for k in state):
             state = {k[len(prefix):]: v for k, v in state.items()}
     return state
@@ -163,8 +176,8 @@ class Speaker:
         self.model = ChatterboxTTS.from_pretrained(device)
         self.device = device
         self.checker = load_checker()
-        self.base_t3 = None        # the stock T3 weights, kept once a fine-tuned voice replaces them
-        self.t3_of = None          # which t3.safetensors is loaded (None = stock)
+        self.base = {}             # part -> the stock weights, kept once a fine-tuned voice replaces them
+        self.loaded = {"t3": None, "s3gen": None}   # part -> which .safetensors is loaded (None = stock)
         self.conds = {}            # voice folder -> prepared conditionals
         self.voice = None
 
@@ -172,15 +185,17 @@ class Speaker:
         import torch
         from safetensors.torch import load_file
         folder = str(Path(folder).resolve())
-        t3 = Path(folder) / "t3.safetensors"
-        want = str(t3) if t3.is_file() else None
-        if want != self.t3_of:
-            if self.base_t3 is None:
-                self.base_t3 = {k: v.detach().to("cpu", copy=True) for k, v in self.model.t3.state_dict().items()}
-            state = plain_state(load_file(want)) if want else self.base_t3
-            self.model.t3.load_state_dict(state, strict=True)
-            self.model.t3.to(self.device).eval()
-            self.t3_of = want
+        t3, s3gen = Path(folder) / "t3.safetensors", s3gen_of(folder)
+        for part, path in (("t3", t3 if t3.is_file() else None), ("s3gen", s3gen)):
+            want = str(path) if path else None
+            if want == self.loaded[part]:
+                continue
+            module = getattr(self.model, part)
+            if part not in self.base:
+                self.base[part] = {k: v.detach().to("cpu", copy=True) for k, v in module.state_dict().items()}
+            module.load_state_dict(plain_state(load_file(want)) if want else self.base[part], strict=True)
+            module.to(self.device).eval()
+            self.loaded[part] = want
             if self.device == "cuda":
                 torch.cuda.empty_cache()
         settings = settings_of(folder)

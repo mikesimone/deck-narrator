@@ -122,6 +122,19 @@ class AddAndRemove(OwnVoiceCase):
         with self.assertRaises(narrate.Fail):
             narrate.add_voice("jane", self.pack({"reference.wav": rec, "voice.json": '{"timbre_reference": "x.wav"}'}))
 
+    def test_voice_pack_with_s3gen(self):
+        rec = recording(self.tmp / "r.wav", 12).read_bytes()
+        z = self.pack({"reference.wav": rec, "t3.safetensors": b"t3", "voc.safetensors": b"s3",
+                       "voice.json": json.dumps({"s3gen": "voc.safetensors"})})
+        narrate.add_voice("mike", z)
+        d = self.tmp / "my-voices" / "mike"
+        self.assertEqual((d / "t3.safetensors").read_bytes(), b"t3")
+        self.assertEqual((d / "s3gen.safetensors").read_bytes(), b"s3")
+        self.assertEqual(json.loads((d / "voice.json").read_text()), {"s3gen": "s3gen.safetensors"})
+        self.assertEqual(own_voice_worker.s3gen_of(d), d / "s3gen.safetensors")
+        with self.assertRaises(narrate.Fail):
+            narrate.add_voice("jane", self.pack({"reference.wav": rec, "voice.json": '{"s3gen": "x.safetensors"}'}))
+
     def test_pack_needs_one_recording_and_one_model(self):
         rec = recording(self.tmp / "r.wav", 12).read_bytes()
         with self.assertRaises(narrate.Fail):
