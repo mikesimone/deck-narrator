@@ -1,0 +1,16 @@
+# torch/torchaudio first, CUDA build (see README): torch==2.8.0 torchaudio==2.8.0 from download.pytorch.org/whl/cu128
+chatterbox-tts==0.1.7
+faster-whisper==1.2.1
+nvidia-cudnn-cu12==9.10.2.21   # Windows: torch bundles its own; ctranslate2 (faster-whisper) needs these
+nvidia-cublas-cu12==12.8.4.1
+librosa==0.11.0
+soundfile>=0.13
+scipy>=1.13
+numpy<2
+jiwer==4.0.0
+pyworld==0.3.5
+speechbrain==1.1.2
+safetensors>=0.5
+bitsandbytes>=0.45
+cmudict==1.1.3
+imageio-ffmpeg>=0.5
