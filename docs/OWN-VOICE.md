@@ -88,7 +88,10 @@ The voice now shows in the **Voice** list at the top, marked **(your own voice)*
 ## Voice packs
 
 If you fine-tuned Chatterbox on a person's voice yourself, Deck Narrator can use the result.
-Make a `.zip` (or a folder) with:
+To train one from your own recordings, use the optional
+[voice-training](../voice-training/README.md) folder in this repository (an NVIDIA card with 12 GB
+or more; it isn't part of the installer). It builds the pack for you. To make one by hand, put
+these in a `.zip` (or a folder):
 
 | File | What |
 |---|---|
