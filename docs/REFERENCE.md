@@ -253,6 +253,12 @@ Python rather than sharing deck-narrator's:
   the last sound isn't clipped. faster-whisper (`base.en`, on the CPU) then transcribes the
   clip; if the last word or much of the text is missing, it's spoken again with the next
   seed, up to 3 tries, keeping the best. Retries are logged and are just as repeatable.
+- A voice pack's `"depop": true` runs a 70 Hz high-pass, then turns the band under 150 Hz
+  down only where it sticks out more than 6 dB above the speech (the low "thud" Chatterbox
+  sometimes puts on a word after a pause). `"breath_db": -9` finds breaths from the spectrum
+  (noise-like, no voicing, followed by a gap) and turns them down by that many dB, shortening
+  any longer than 0.4 s; `s`, `sh`, `f` and `h` are left alone. Both run on each clip, in
+  that order, before `pause_scale` and `speed`.
 - A voice pack's `pause_scale` lengthens each pause of at least 0.12 s inside a clip (by
   repeating its own quiet audio, at most 0.35 s added), and `speed` time-stretches the clip
   with ffmpeg's `atempo`, keeping the pitch. Sentences of your own voice are 0.35 s apart

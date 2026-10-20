@@ -2,6 +2,7 @@
 """Your own voice (Chatterbox): adding and removing voices, voice packs, and the talk with
 own_voice_worker.py, using a stand-in worker so neither Chatterbox nor its model is needed.
 The real thing runs in CI's own-voice job."""
+import importlib.util
 import json
 import os
 import shutil
@@ -106,17 +107,19 @@ class AddAndRemove(OwnVoiceCase):
         self.assertEqual((d / "t3.safetensors").read_bytes(), b"weights")
         self.assertEqual(json.loads((d / "voice.json").read_text()), {"cfg_weight": 0.3, "temperature": 0.8})
         self.assertEqual(own_voice_worker.settings_of(d), {"exaggeration": 0.5, "cfg_weight": 0.3, "temperature": 0.8,
-                                                                  "pause_scale": 1.0, "speed": 1.0})
+                                                                  "pause_scale": 1.0, "speed": 1.0,
+                                                                  "breath_db": 0.0, "depop": 0.0})
 
     def test_voice_pack_with_timbre(self):
         rec = recording(self.tmp / "r.wav", 12).read_bytes()
         z = self.pack({"reference.wav": rec, "clean.wav": rec,
                        "voice.json": json.dumps({"timbre_reference": "clean.wav", "cfg_weight": 0.3, "junk": 1,
-                                                 "speed": 0.95, "pause_scale": 1.6})})
+                                                 "speed": 0.95, "pause_scale": 1.6, "depop": True,
+                                                 "breath_db": -9})})
         narrate.add_voice("mike", z)
         d = self.tmp / "my-voices" / "mike"
         self.assertEqual(json.loads((d / "voice.json").read_text()),
-                         {"cfg_weight": 0.3, "speed": 0.95, "pause_scale": 1.6,
+                         {"cfg_weight": 0.3, "speed": 0.95, "pause_scale": 1.6, "depop": 1.0, "breath_db": -9.0,
                           "timbre_reference": "timbre_reference.wav"})
         self.assertEqual(own_voice_worker.timbre_of(d), d / "timbre_reference.wav")
         with self.assertRaises(narrate.Fail):
@@ -317,6 +320,33 @@ class Pace(unittest.TestCase):
         y = own_voice_worker.extend_pauses(x, sr, 1.6)
         self.assertAlmostEqual((len(y) - len(x)) / sr, 0.18, delta=0.02)    # only the middle pause, 0.3 s x 0.6
         self.assertIs(own_voice_worker.extend_pauses(x, sr, 1.0), x)
+
+    @unittest.skipUnless(importlib.util.find_spec("scipy") and importlib.util.find_spec("librosa"),
+                         "needs scipy and librosa (the own-voice setup has them)")
+    def test_depop_and_breaths(self):
+        sr = 24000
+        rng = np.random.default_rng(0)
+        t = np.arange(sr // 2) / sr
+        word = (0.3 * np.sin(2 * np.pi * 200 * t) + 0.1 * np.sin(2 * np.pi * 2400 * t)).astype(np.float32)
+        gap = np.full(int(0.3 * sr), 1e-4, dtype=np.float32)
+        thud = np.zeros(int(0.05 * sr), np.float32)
+        thud += (0.6 * np.sin(2 * np.pi * 50 * np.arange(len(thud)) / sr) * np.hanning(len(thud))).astype(np.float32)
+        x = np.concatenate([word, gap, thud, word])
+        y = own_voice_worker.depop(x, sr)
+        self.assertEqual(len(y), len(x))
+        a = len(word) + len(gap)
+        self.assertLess(np.abs(y[a:a + len(thud)]).max(), 0.5 * np.abs(x[a:a + len(thud)]).max())  # thud turned down
+        self.assertGreater(np.abs(y[:len(word)]).max(), 0.3)                                     # speech kept
+        breath = np.zeros(int(0.6 * sr), np.float32)
+        from scipy.signal import butter, sosfilt
+        breath = sosfilt(butter(2, [1200, 3500], btype="band", fs=sr, output="sos"),
+                         rng.standard_normal(len(breath))).astype(np.float32) * 0.03
+        z = np.concatenate([word, gap, breath, gap, word])
+        self.assertTrue(np.array_equal(own_voice_worker.tame_breaths(z, sr, 0), z))
+        w = own_voice_worker.tame_breaths(z, sr, -9.0)
+        self.assertEqual(len(own_voice_worker.find_breaths(z, sr)), 1)
+        self.assertLess(len(w), len(z))                                                          # long breath shortened
+        self.assertTrue(np.allclose(w[:len(word) // 2], z[:len(word) // 2]))                      # speech untouched
 
     def test_speed_from_voice_json(self):
         d = Path(tempfile.mkdtemp(prefix="dn-speed-"))

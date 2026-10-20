@@ -28,7 +28,7 @@ import builds as anim
 if sys.platform == "darwin":
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-VERSION = "1.3.2"
+VERSION = "1.3.3"
 SAMPLE_RATE = 24000          # Kokoro's native output rate
 FPS = 30
 WIDTH, HEIGHT = 1920, 1080
@@ -1386,7 +1386,8 @@ def add_voice(name, src):
             if models:
                 copy(models[0], staging / "t3.safetensors")
             if settings:
-                keep = {k: float(settings[k]) for k in ("exaggeration", "cfg_weight", "temperature", "speed", "pause_scale")
+                keep = {k: float(settings[k]) for k in ("exaggeration", "cfg_weight", "temperature", "speed", "pause_scale",
+                                                      "breath_db", "depop")
                         if k in settings}
                 if timbre:
                     if not timbre.lower().endswith(AUDIO_EXTS):

@@ -36,7 +36,8 @@ import re
 import sys
 from pathlib import Path
 
-DEFAULTS = {"exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8, "pause_scale": 1.0, "speed": 1.0}
+DEFAULTS = {"exaggeration": 0.5, "cfg_weight": 0.5, "temperature": 0.8, "pause_scale": 1.0, "speed": 1.0,
+            "breath_db": 0.0, "depop": 0.0}
 AUDIO = (".wav", ".flac", ".mp3", ".ogg")
 WHISPER = "base.en"         # faster-whisper model for the cut-off check (about 145 MB)
 MAX_TRIES = 3               # seeds tried per clip before keeping the best one
@@ -118,6 +119,96 @@ def heard_ok(expected, heard):
         last_ok = any(difflib.SequenceMatcher(None, last, w).ratio() >= 0.75 for w in got[-3:])
     ok = last_ok and coverage >= 0.7 and len(got) <= high
     return ok, (last_ok, coverage if len(got) <= high else 0.5 * coverage)
+
+
+def depop(wav, sr, hp_hz=70, lf_hz=150, over_db=6.0, attack_ms=10, release_ms=60):
+    """Thud fix. S3Gen sometimes starts a word after a pause with a low-frequency burst (a plosive 'pop' learned from
+    a recording made without a pop filter), heard as a thud. 1) a gentle 2nd-order high-pass at hp_hz (the training
+    audio was high-passed at 70 Hz anyway); 2) a dynamic de-pop: the < lf_hz band is split off (zero-phase low-pass,
+    so lf + rest sums back exactly) and turned down only where it rises more than over_db above the clip's typical
+    speech level (> 300 Hz) and above the rest of the spectrum, with a smooth gain (no gating). Voiced speech, whose
+    fundamental sits in that band, is untouched because it never exceeds the speech level by 6 dB."""
+    import numpy as np
+    from scipy.signal import butter, sosfiltfilt
+    x = np.asarray(wav, dtype=np.float64)
+    if len(x) < sr // 10: return np.asarray(wav, dtype=np.float32)
+    x = sosfiltfilt(butter(2, hp_hz, btype="high", fs=sr, output="sos"), x)
+    lf = sosfiltfilt(butter(4, lf_hz, btype="low", fs=sr, output="sos"), x); rest = x - lf
+    hi = sosfiltfilt(butter(4, 300, btype="high", fs=sr, output="sos"), x)
+    hop = int(sr * 0.005); n = len(x) // hop
+    if n < 4: return x.astype(np.float32)
+    db = lambda v: 20 * np.log10(np.sqrt((v[:n * hop].reshape(n, hop) ** 2).mean(1)) + 1e-9)
+    L, H = db(lf), db(hi); sp = np.median(H[H > np.percentile(H, 99) - 30])
+    over = np.maximum(0, L - np.maximum(sp + over_db, H + 3))           # how far the low band sticks out
+    g = 10 ** (-over / 20)
+    a, r = np.exp(-1 / max(1, attack_ms / 5)), np.exp(-1 / max(1, release_ms / 5)); s = np.ones(n); cur = 1.0
+    for i in range(n):                                                  # fast attack (down), slow release (up)
+        cur = a * cur + (1 - a) * g[i] if g[i] < cur else r * cur + (1 - r) * g[i]; s[i] = cur
+    gain = np.interp(np.arange(len(x)), np.arange(n) * hop + hop / 2, s)
+    return (rest + gain * lf).astype(np.float32)
+
+
+def find_breaths(wav, sr, min_ms=150, max_level_db=0.0, min_level_db=-45.0, lf_ratio_db=-12.0, min_flat=0.08,
+                 cen_lo=900, cen_hi=4500, gap_ms=30):
+    """Breath segments, from the spectrum (no ASR, no pitch tracker): 10 ms frames whose energy below 400 Hz is at
+    least lf_ratio_db under the 1-5 kHz band (no voicing harmonics), that are noise-like (spectral flatness over
+    0.5-6 kHz >= min_flat), centred between cen_lo and cen_hi (so /s/ and /sh/, which sit higher, are excluded),
+    between min_level_db and max_level_db re the clip's median speech frame, in runs of at least min_ms (/f/, /h/ and
+    stop bursts are shorter), with no voiced frame within gap_ms after the run ends (an /h/ runs straight into its
+    vowel; an inhale leaves a gap). Returns [(start_sample, end_sample)]."""
+    import numpy as np
+    import librosa
+    x = np.asarray(wav, dtype=np.float32); hop = int(sr * 0.01); n = len(x) // hop
+    if n < 10: return []
+    S = np.abs(librosa.stft(x, n_fft=1024, hop_length=hop, center=True))[:, :n] ** 2
+    f = librosa.fft_frequencies(sr=sr, n_fft=1024); band = lambda lo, hi: S[(f >= lo) & (f < hi)]
+    db = lambda v: 10 * np.log10(v + 1e-12)
+    low, mid = db(band(60, 400).sum(0)), db(band(1000, 5000).sum(0)); tot = db(S.sum(0))
+    B = band(500, 6000); flat = np.exp(np.mean(np.log(B + 1e-12), 0)) / (np.mean(B, 0) + 1e-12)
+    cen = (f[:, None] * S).sum(0) / (S.sum(0) + 1e-12)
+    voiced = (low - mid > 0) & (tot > np.percentile(tot, 99) - 35)
+    sp = np.median(tot[voiced]) if voiced.any() else np.percentile(tot, 90)
+    cand = (low - mid < lf_ratio_db) & (flat >= min_flat) & (cen >= cen_lo) & (cen <= cen_hi) & (tot < sp + max_level_db) & (tot > sp + min_level_db)
+    cand = np.convolve(cand.astype(float), np.ones(3) / 3, "same") > 0.5        # bridge single-frame gaps
+    out, i = [], 0
+    while i < n:
+        if cand[i]:
+            j = i
+            while j < n and cand[j]: j += 1
+            if (j - i) * 10 >= min_ms and not voiced[j:j + gap_ms // 10 + 1].any(): out.append((i * hop, j * hop))
+            i = j
+        else: i += 1
+    return out
+
+
+def tame_breaths(wav, sr, breath_db=-9.0, max_ms=400, ramp_ms=30):
+    """Quieter breaths, never removed: every find_breaths() segment is turned down by breath_db (negative dB) with
+    ramp_ms raised-cosine ramps inside the segment (no hard gating), and a breath longer than max_ms is shortened to max_ms by cutting
+    its middle with a 10 ms crossfade. breath_db 0 = off."""
+    import numpy as np
+    x = np.asarray(wav, dtype=np.float32).copy()
+    if not breath_db: return x
+    segs = find_breaths(x, sr)
+    if not segs: return x
+    g = np.ones(len(x), np.float32); lo = 10 ** (breath_db / 20)
+    for a, b in segs:                                   # ramps sit inside the breath, so neighbouring speech is untouched
+        k = min(int(sr * ramp_ms / 1000), (b - a) // 2)
+        env = np.full(b - a, lo, np.float32)
+        if k:
+            r = (1 + np.cos(np.linspace(0, np.pi, k))) / 2 * (1 - lo) + lo   # 1 -> lo, raised cosine
+            env[:k] = r; env[-k:] = r[::-1]
+        g[a:b] = np.minimum(g[a:b], env)
+    x *= g
+    cut = int(sr * max_ms / 1000); xf = int(sr * 0.01); pieces, last = [], 0
+    for a, b in segs:
+        if b - a <= cut: continue
+        keep = cut // 2; m1, m2 = a + keep, b - keep                            # keep the breath's start and end
+        fade = np.linspace(1, 0, xf, dtype=np.float32)
+        head = x[last:m1].copy(); tail = x[m2:m2 + xf].copy()
+        if len(head) >= xf and len(tail) == xf: head[-xf:] = head[-xf:] * fade + tail * (1 - fade); pieces.append(head); last = m2 + xf
+        else: pieces.append(x[last:m1]); last = m2
+    pieces.append(x[last:])
+    return np.concatenate(pieces)
 
 
 def extend_pauses(x, sr, factor, min_pause=0.12, max_added=0.35, quiet_db=-35):
@@ -287,6 +378,8 @@ class Speaker:
             if best is None or score > best[0]:
                 best = (score, audio, k + 1)
         _, audio, tries = best
+        if s.get("depop"): audio = depop(audio, self.model.sr)                    # low-frequency onset thuds
+        if s.get("breath_db"): audio = tame_breaths(audio, self.model.sr, s["breath_db"])  # quieter, shorter breaths
         audio = extend_pauses(audio, self.model.sr, s["pause_scale"])
         sf.write(out, audio, self.model.sr, subtype="FLOAT")
         return len(audio) / self.model.sr, tries

@@ -107,7 +107,8 @@ def main():
     run(deck, "--voice", "ci-voice", "--slides", "1", "-o", video, timeout=1800)
     assert video.is_file() and video.stat().st_size > 10_000, "no video"
 
-    # A voice pack whose timbre_reference sets the sound and reference.wav the delivery.
+    # A voice pack whose timbre_reference sets the sound and reference.wav the delivery, with the
+    # thud and breath clean-up on.
     timbre = work / "timbre.wav"
     run("--voice", "af_heart", "--sample", REFERENCE, "-o", timbre)
     pack = work / "pack.zip"
@@ -115,7 +116,8 @@ def main():
         z.write(ref, "reference.wav")
         z.write(timbre, "timbre_reference.wav")
         z.writestr("voice.json", json.dumps({"timbre_reference": "timbre_reference.wav", "cfg_weight": 0.3,
-                                            "pause_scale": 1.6, "speed": 0.95}))
+                                            "pause_scale": 1.6, "speed": 0.95, "depop": True,
+                                            "breath_db": -9.0}))
     run("--add-voice", "ci-pack", pack)
     run("--voice", "ci-pack", "--sample", SAY, "-o", work / "pack.wav", timeout=1800)
     assert sf.info(str(work / "pack.wav")).duration > 1.5, "the voice pack said nothing"
