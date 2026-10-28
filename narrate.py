@@ -28,7 +28,7 @@ import builds as anim
 if sys.platform == "darwin":
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-VERSION = "1.3.3"
+VERSION = "1.3.4"
 SAMPLE_RATE = 24000          # Kokoro's native output rate
 FPS = 30
 WIDTH, HEIGHT = 1920, 1080
@@ -132,6 +132,9 @@ def build_parser():
     p.add_argument("--add-word", nargs=2, metavar=("WORD", "PHONEMES"),
                    help="save WORD=[WORD](/PHONEMES/) in the dictionary (--pronunciations FILE, else your personal "
                         "dictionary, created if needed), so WORD is said that way in every deck, and exit")
+    p.add_argument("--say-as", nargs=2, metavar=("WORD", "TEXT"),
+                   help="save in the dictionary (as --add-word does) that your own voices say WORD as TEXT, a plain "
+                        "respelling like Ennt, and exit. Phonemes already saved for WORD stay for the built-in voices")
     p.add_argument("--sample", metavar="TEXT", help="speak TEXT with --voice, --speed and --pronunciations into a WAV and exit "
                    "(-o names the .wav; default: deck-narrator-sample.wav in the temp folder)")
     p.add_argument("--keep-temp", action="store_true", help="keep the intermediate files and print where they are")
@@ -231,6 +234,10 @@ DICT_TEMPLATE = """\
 # NGINX=engine x
 # SQL=sequel
 # Kubernetes=koo ber net eez
+#
+# Phonemes are for the built-in voices; the word in the brackets is what your
+# own voice says, so one rule can fix both:
+# Ent=[Ennt](/ˈɛnt/)
 """
 
 
@@ -288,21 +295,30 @@ def rules_for(args):
     return dictionary, BUILTIN_PRONUNCIATIONS + (load_pronunciations(dictionary) if dictionary else [])
 
 
-def add_word(path, word, phonemes):
-    """Save word=[word](/phonemes/) in the dictionary at path (created from DICT_TEMPLATE
-    if missing). A rule for the same word is replaced where it is; otherwise it goes at
-    the end. Comments and other rules are kept as they are."""
-    word = word.strip()
-    phonemes = phonemes.strip().strip("/")
-    if not word or not re.fullmatch(r"[\w'’.-]+", word) or "=" in word:
-        raise Fail(f"--add-word: {word!r} isn't a single word")
-    if not phonemes or "/" in phonemes or ")" in phonemes:
-        raise Fail(f"--add-word: {phonemes!r} isn't a usable phoneme string")
+WORD_RE = re.compile(r"[\w'’.-]+")
+
+
+def rule_parts(word, repl):
+    """A dictionary replacement -> (what your own voice says, phonemes or None).
+    [Ennt](/ɛnt/) is both; a plain respelling is said by every voice."""
+    m = re.fullmatch(r"\[([^\[\]]+)\]\(/([^)]*)/\)", repl)
+    return (m.group(1), m.group(2)) if m else (repl, None)
+
+
+def current_rule(path, word):
+    """WORD's replacement: the dictionary at path's rule, else the built-in one, else None."""
+    rules = dict(BUILTIN_PRONUNCIATIONS)
+    if Path(path).is_file():
+        rules.update(load_pronunciations(path))   # refuse to rewrite a file that's already broken
+    return rules.get(word)
+
+
+def save_rule(path, word, rule):
+    """Write word=... in the dictionary at path (created from DICT_TEMPLATE if missing). A rule
+    for the same word is replaced where it is; otherwise it goes at the end. Comments and other
+    rules are kept as they are."""
     path = Path(path)
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else DICT_TEMPLATE.splitlines()
-    if path.is_file():
-        load_pronunciations(path)                 # refuse to rewrite a file that's already broken
-    rule = f"{word}=[{word}](/{phonemes}/)"
     for i, line in enumerate(lines):
         s = line.strip()
         if s and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip() == word:
@@ -316,6 +332,37 @@ def add_word(path, word, phonemes):
     os.replace(tmp, path)
     log(f"Dictionary: {rule} saved in {path}")
     return 0
+
+
+def add_word(path, word, phonemes):
+    """Save word=[word](/phonemes/) in the dictionary at path. A respelling already saved for
+    your own voice (see say_as) is kept: word=[respelling](/phonemes/)."""
+    word = word.strip()
+    phonemes = phonemes.strip().strip("/")
+    if not word or not WORD_RE.fullmatch(word) or "=" in word:
+        raise Fail(f"--add-word: {word!r} isn't a single word")
+    if not phonemes or "/" in phonemes or ")" in phonemes:
+        raise Fail(f"--add-word: {phonemes!r} isn't a usable phoneme string")
+    old = current_rule(path, word)
+    said = rule_parts(word, old)[0] if old else word
+    if "[" in said or "]" in said:                 # an inline override, not a respelling
+        said = word
+    return save_rule(path, word, f"{word}=[{said}](/{phonemes}/)")
+
+
+def say_as(path, word, text):
+    """Save that your own voices say word as text (a plain respelling, like Ennt for Ent): your
+    voice reads spelling, not phonemes. Phonemes already saved for word (or built in) are kept
+    for the built-in voices, as word=[text](/phonemes/); without any, it's word=text, which
+    every voice reads."""
+    word, text = word.strip(), " ".join(text.split())
+    if not word or not WORD_RE.fullmatch(word) or "=" in word:
+        raise Fail(f"--say-as: {word!r} isn't a single word")
+    if not text or re.search(r"[\[\]()=/#]", text):
+        raise Fail(f"--say-as: {text!r} isn't a plain respelling (letters and spaces, like Ennt)")
+    old = current_rule(path, word)
+    phonemes = rule_parts(word, old)[1] if old else None
+    return save_rule(path, word, f"{word}=[{text}](/{phonemes}/)" if phonemes else f"{word}={text}")
 
 
 def load_pronunciations(path):
@@ -2086,6 +2133,8 @@ def main(argv=None):
         return 0
     if args.add_word:
         return add_word(args.pronunciations or default_dictionary(), *args.add_word)
+    if args.say_as:
+        return say_as(args.pronunciations or default_dictionary(), *args.say_as)
     if args.sample:
         return speak_sample(args)
     if not args.deck:

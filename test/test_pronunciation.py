@@ -139,6 +139,24 @@ class Dictionary(unittest.TestCase):
             narrate.add_word(self.path, "ok", "ˈOkA")
         self.assertEqual(self.path.read_text(encoding="utf-8"), "not a rule\n")
 
+    def test_say_as_respells_for_your_own_voice_and_keeps_phonemes(self):
+        with quiet():
+            narrate.add_word(self.path, "Ent", "ˈɛnt")
+            narrate.say_as(self.path, "Ent", "Ennt")             # keeps the phonemes
+            narrate.say_as(self.path, "Zscaler", " zee  scaler ")  # no phonemes: plain, every voice
+            narrate.say_as(self.path, "JSON", "Jay son")         # a built-in word keeps its phonemes
+            narrate.add_word(self.path, "Zscaler", "zˈiskAlɚ")   # phonemes later: the respelling stays
+            narrate.add_word(self.path, "Ent", "ˈɛnt")
+        rules = narrate.load_pronunciations(self.path)
+        self.assertEqual(rules, [("Ent", "[Ennt](/ˈɛnt/)"), ("Zscaler", "[zee scaler](/zˈiskAlɚ/)"),
+                                 ("JSON", "[Jay son](/ʤˈAsᵊn/)")])
+        said = narrate.apply_pronunciations("Ent, Zscaler and JSON.", narrate.BUILTIN_PRONUNCIATIONS + rules)
+        self.assertEqual(said, "[Ennt](/ˈɛnt/), [zee scaler](/zˈiskAlɚ/) and [Jay son](/ʤˈAsᵊn/).")
+        self.assertEqual(narrate.plain_text(said), "Ennt, zee scaler and Jay son.")      # what your own voice reads
+        for word, text in (("two words", "x"), ("ok", ""), ("ok", "[x](/y/)"), ("ok", "a=b")):
+            with self.assertRaises(narrate.Fail):
+                narrate.say_as(self.path, word, text)
+
     def test_personal_dictionary_is_used_only_when_it_exists(self):
         args = narrate.build_parser().parse_args(["deck.pptx"])
         self.assertIsNone(narrate.dictionary_for(args))

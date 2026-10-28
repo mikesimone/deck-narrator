@@ -77,6 +77,14 @@ class BuildArgs(unittest.TestCase):
         with self.assertRaises(ValueError):
             gui.build_args(form(phonemes_text=""), "phonemes_text")
 
+    def test_say_as(self):
+        a = self.parse(gui.build_args(form(say_word=" Ent ", say_text="Ennt"), "say_as"))
+        self.assertEqual((a.say_as, a.pronunciations, a.deck), (["Ent", "Ennt"], None, None))
+        a = self.parse(gui.build_args(form(say_word="Ent", say_text="Ennt", pronunciations="/d.txt"), "say_as"))
+        self.assertEqual(a.pronunciations, "/d.txt")
+        with self.assertRaises(ValueError):
+            gui.build_args(form(say_word="Ent", say_text=" "), "say_as")
+
     def test_voice_labels_round_trip(self):
         for v in narrate.KNOWN_VOICES:
             self.assertEqual(gui.voice_from_label(gui.voice_label(v)), v)

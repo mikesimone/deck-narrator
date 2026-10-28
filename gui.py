@@ -45,6 +45,7 @@ COVERED = {
     "check_pronunciation", "json", "fix_word",   # Check pronunciation and its window
     "renderer",        # Settings: "Draw slides with"
     "add_word",        # Check pronunciation: Use this on a word the dictionary lacks
+    "say_as",          # Pronunciation: "Your own voice says ... as ..." Save
     "install_own_voice", "add_voice", "remove_voice",   # Settings: Your own voice
     "remove_own_voice_support",                         # Settings: Your own voice > Remove Chatterbox
     "help", "version",
@@ -198,7 +199,7 @@ def build_args(f, mode):
 
     mode: "video", "builds", "check" (pronunciation), "phonemes" (whole deck), "phonemes_text", "sample",
     and for your own voice "install_own_voice", "add_voice" (own_voice_name, own_voice_file), "remove_voice",
-    "remove_own_voice_support".
+    "remove_own_voice_support", and "say_as" (say_word, say_text) for the dictionary.
     Raises ValueError with a user-facing message when something required is missing.
     """
     if mode == "install_own_voice":
@@ -216,6 +217,11 @@ def build_args(f, mode):
         if not f.get("own_voice_name"):
             raise ValueError("Choose one of your own voices to remove.")
         return ["--remove-voice", f["own_voice_name"]]
+    if mode == "say_as":
+        word, text = f.get("say_word", "").strip(), f.get("say_text", "").strip()
+        if not word or not text:
+            raise ValueError("Type the word, and how your own voice should say it (like Ent as Ennt).")
+        return (["--pronunciations", f["pronunciations"]] if f.get("pronunciations") else []) + ["--say-as", word, text]
     args = ["--voice", f["voice"], "--device", f["device"]]
     if f.get("pronunciations"):
         args += ["--pronunciations", f["pronunciations"]]
@@ -642,6 +648,7 @@ class App:
             "allow_desktop": tk.BooleanVar(),
             "sample_text": tk.StringVar(value=narrate.DEFAULT_SAMPLE_TEXT),
             "phonemes_text": tk.StringVar(),
+            "say_word": tk.StringVar(), "say_text": tk.StringVar(),
             "check_voices": tk.BooleanVar(value=True),
             "check_updates": tk.BooleanVar(value=True),
             "renderer": tk.StringVar(value="auto"),
@@ -755,6 +762,17 @@ class App:
         ttk.Label(pron, text="Check pronunciation (below) finds words that may be said wrong. Use this on a "
                              "new word saves it here, for every deck. Choose another file in Settings.",
                   style="Hint.TLabel", wraplength=560, justify="left").grid(row=3, column=1, columnspan=2, sticky="w", padx=6)
+        ttk.Label(pron, text="Your own voice").grid(row=4, column=0, sticky="w", **pad)
+        say = ttk.Frame(pron)
+        say.grid(row=4, column=1, sticky="w")
+        ttk.Label(say, text="says").pack(side="left", padx=(0, 4))
+        ttk.Entry(say, textvariable=self.v["say_word"], width=14).pack(side="left")
+        ttk.Label(say, text="as").pack(side="left", padx=4)
+        ttk.Entry(say, textvariable=self.v["say_text"], width=14).pack(side="left")
+        ttk.Button(pron, text="Save", command=lambda: self.run("say_as")).grid(row=4, column=2, sticky="w", **pad)
+        ttk.Label(pron, text="Your own voice reads spelling, not phonemes: type how it sounds, like Ent as Ennt. "
+                             "Saved in the dictionary for every deck; the built-in voices keep their phonemes.",
+                  style="Hint.TLabel", wraplength=560, justify="left").grid(row=5, column=1, columnspan=2, sticky="w", padx=6)
         self.show_dictionary()
 
         logtab = ttk.Frame(self.tabs, padding=(4, 4))
@@ -1329,7 +1347,7 @@ class App:
         self.mode = mode
         self.out_lines = []
         self.clear_log()
-        if mode not in ("sample", "add_voice", "remove_voice", "remove_own_voice_support"):
+        if mode not in ("sample", "add_voice", "remove_voice", "remove_own_voice_support", "say_as"):
             self.tabs.select(self.log_tab)
         self.append("> deck-narrator " + " ".join(shlex.quote(a) for a in args))
         self.progress.configure(mode="indeterminate")
@@ -1338,6 +1356,7 @@ class App:
                                     "install_own_voice": "Setting up your own voice (a large download)...",
                                     "add_voice": "Adding the voice...", "remove_voice": "Removing the voice...",
                                     "remove_own_voice_support": "Removing Chatterbox...",
+                                    "say_as": "Saving it in your dictionary...",
                                     "builds": "Reading the deck's animations...", "check": "Checking pronunciation..."}.get(mode, "Working..."))
         self.cancel_btn.configure(state="normal")
         self.make_btn.configure(state="disabled")
@@ -1381,6 +1400,10 @@ class App:
         self.pending_own = None
         if self.mode in ("install_own_voice", "add_voice", "remove_voice", "remove_own_voice_support"):
             self.refresh_voices()
+        if self.mode == "say_as" and code == 0 and not cancelled:
+            if not self.v["pronunciations"].get().strip():
+                self.v["pronunciations"].set(str(narrate.default_dictionary()))   # the dictionary in use, shown in Settings
+            self.show_dictionary()
         if cancelled:
             self.status.configure(text="Cancelled.")
         elif code != 0:
@@ -1411,6 +1434,9 @@ class App:
             self.status.configure(text=f"Voice {name} added and chosen." if name else "Done.")
             if name and narrate.own_voice_ready():      # make its sample now; it's saved, so Play sample is instant later
                 self.root.after(200, lambda: self.job is None and self.run("sample"))
+        elif self.mode == "say_as":
+            self.status.configure(text=f"Saved: your own voice says {self.v['say_word'].get().strip()} as "
+                                       f"{self.v['say_text'].get().strip()}, in every deck.")
         elif self.mode == "sample":
             self.status.configure(text="Playing the sample.")
             try:

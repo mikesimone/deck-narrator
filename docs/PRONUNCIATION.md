@@ -208,6 +208,20 @@ deck-narrator --phonemes "zee scaler"            # zˈi skˈAləɹ
 deck-narrator --add-word Zscaler "zˈi skˈAləɹ"   # adds or replaces Zscaler=[Zscaler](/zˈi skˈAləɹ/)
 ```
 
+**Your own voice.** A voice of your own (Chatterbox) reads spelling, not phonemes, so it
+ignores `/phonemes/`. In `[word](/phonemes/)` the built-in voices use the phonemes and your own
+voice says what's in the brackets, so put the respelling there: `Ent=[Ennt](/ˈɛnt/)` fixes
+"Ent" for every voice. A plain rule like `Ent=Ennt` is read by every voice too. The GUI's
+Pronunciation tab saves one for you (**Your own voice says** Ent **as** Ennt, then **Save**),
+keeping any phonemes the word already has; so does the command line:
+
+```bash
+deck-narrator --say-as Ent Ennt    # Ent=[Ennt](/ˈɛnt/) if Ent had phonemes, else Ent=Ennt
+```
+
+Respell it the way it sounds: "Ennt", "Jay son", "koo ber net eez". **Use this** later keeps
+the respelling.
+
 A starter file is in `test/pronunciations.txt`. You can also keep one file per deck,
 next to the deck:
 
@@ -222,6 +236,7 @@ deck-narrator deck.pptx --pronunciations deck.words.txt
 | One heteronym read wrong in one sentence ("present", "read", "live") | Inline `[word](/phonemes/)` in that slide's notes |
 | An acronym or name wrong everywhere | Pronunciation file, plain respelling |
 | A name that no respelling gets right | Pronunciation file, with `[word](/phonemes/)` as the replacement |
+| Your own voice says a word wrong | `--say-as WORD RESPELLING` (or the Pronunciation tab), which saves `WORD=[RESPELLING](/phonemes/)` |
 | A word too strong or too weak in a sentence | Inline stress nudge, `[word](-1)` or `[word](+2)` |
 | A pause in the wrong place | Change the punctuation in the notes; a comma or period is a pause |
 | `[pause]` doesn't pause | Expected: stage directions are removed, not acted out. Use a period, or split the thought across slides |

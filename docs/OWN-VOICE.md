@@ -70,10 +70,10 @@ The voice now shows in the **Voice** list at the top, marked **(your own voice)*
   exactly as before, so changing one slide doesn't change the others.
 - **Speed doesn't apply.** The **Speed** setting is for the built-in voices only. Your voice
   talks at the pace of your recording.
-- **Fixing a word:** pronunciation rules written in phonemes (`[word](/phonemes/)`) only work
-  for the built-in voices; your voice reads the plain word. To change how your voice says
-  something, spell it the way it sounds in the notes, for example `Zscaler=Zee-scaler` in
-  your dictionary (see [PRONUNCIATION.md](PRONUNCIATION.md)).
+- **Fixing a word:** your voice reads spelling, not phonemes. In the **Pronunciation** tab,
+  type the word and how it sounds (**Your own voice says** Ent **as** Ennt) and click
+  **Save**. That goes in your dictionary, so every deck says it that way, and the built-in
+  voices keep any phonemes the word already had (see [PRONUNCIATION.md](PRONUNCIATION.md#the-pronunciation-file-every-occurrence)).
 - **Everything stays on your computer.** The recording, the voice and the speech never leave
   it. Chatterbox puts an inaudible watermark in the audio it makes, so it can be identified
   as AI-made.
