@@ -13,7 +13,29 @@ if [[ "$(uname)" == "Darwin" ]]; then
         exit 1
     fi
     command -v ffmpeg >/dev/null || brew install ffmpeg
-    [[ -d /Applications/LibreOffice.app || -d "$HOME/Applications/LibreOffice.app" ]] || brew install --cask libreoffice
+    if [[ ! -d /Applications/LibreOffice.app && ! -d "$HOME/Applications/LibreOffice.app" ]] \
+            && ! brew install --cask libreoffice; then
+        # Homebrew's cask can point at a release the download site doesn't have yet (a 404):
+        # take the newest stable LibreOffice that is there, straight from documentfoundation.org.
+        echo "Homebrew couldn't download LibreOffice; getting it from documentfoundation.org instead." >&2
+        lo_base=https://download.documentfoundation.org/libreoffice/stable
+        if [[ "$(uname -m)" == arm64 ]]; then lo_dir=aarch64 lo_arch=aarch64; else lo_dir=x86_64 lo_arch=x86-64; fi
+        lo_tmp="$(mktemp -d)"
+        lo_done=
+        for v in $(curl -fsSL "$lo_base/" | grep -oE 'href="[0-9]+(\.[0-9]+)+/"' | grep -oE '[0-9]+(\.[0-9]+)+' \
+                   | sort -u -t. -k1,1nr -k2,2nr -k3,3nr); do
+            curl -fL --retry 2 -o "$lo_tmp/lo.dmg" "$lo_base/$v/mac/$lo_dir/LibreOffice_${v}_MacOS_${lo_arch}.dmg" || continue
+            hdiutil attach -nobrowse -quiet -mountpoint "$lo_tmp/mnt" "$lo_tmp/lo.dmg"
+            cp -R "$lo_tmp/mnt/LibreOffice.app" /Applications/ 2>/dev/null \
+                || { mkdir -p "$HOME/Applications" && cp -R "$lo_tmp/mnt/LibreOffice.app" "$HOME/Applications/"; }
+            hdiutil detach -quiet "$lo_tmp/mnt"
+            echo "LibreOffice $v installed." >&2
+            lo_done=1
+            break
+        done
+        rm -rf "$lo_tmp"
+        [[ -n "$lo_done" ]] || { echo "Couldn't download LibreOffice. Install it from libreoffice.org, then run this again." >&2; exit 1; }
+    fi
 else
     # Refresh the package lists first: a stale list asks mirrors for package versions they no longer have.
     sudo apt-get update -q
